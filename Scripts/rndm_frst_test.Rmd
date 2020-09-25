@@ -1,0 +1,625 @@
+---
+title: "Random Forest Training"
+output: html_notebook
+---
+
+Load libraries
+```{r}
+source("../General/parameters.R")
+source("../General/rmb_functions.R")
+library(cowplot)
+library(randomForest)
+library(tidyverse)
+```
+
+Load data
+```{r}
+map <- readRDS("../Data/drought_map.RDS")
+tax <- readRDS("../Data/tax.RDS")
+otu <- readRDS("../Data/otu_pers.RDS") 
+train.set <- readRDS("../Data/rf_results.RDS") %>% 
+  mutate(Compartment = fct_recode(Compartment, 
+                                  "Rhizosphere" = "RS",
+                                  "Endosphere" = "ES")) %>% 
+  mutate(Compartment = fct_relevel(Compartment, "Rhizosphere"))
+  
+all.clust.summary <- readRDS("../Data/drought_clusters.RDS")
+```
+
+Load data
+```{r}
+## Get log-transformed relative abundances for the OTU table
+otu <- rel_ab(otu)
+otu <- log_norm(otu)
+
+map <- mutate(map, Set = ifelse(Treatment2 == "WC_TRN", "Train", "Test"))
+
+# The predictors need to be formatted as a data frame or matrix
+get_predictors <- function(x){
+  select(x, -(SampleID:Age))
+} 
+
+# The response variable needs to be formatted as a vector
+get_response <- function(x) {
+  select(x, Age) %>% 
+  .$Age
+}  
+
+whole.set <- as.data.frame(t(otu)) %>%  
+  mutate(SampleID = rownames(.)) %>% 
+  inner_join(select(map, SampleID, Compartment, Set, Treatment, Age), by = "SampleID") %>% 
+  group_by(Set, Compartment, Treatment) %>% 
+  nest() %>% 
+  mutate(otu = map(data, get_predictors),
+         age = map(data, get_response)) %>% 
+  mutate(Compartment = fct_recode(Compartment, 
+                                  "Rhizosphere" = "RS",
+                                  "Endosphere" = "ES")) %>% 
+  mutate(Compartment = fct_relevel(Compartment, "Rhizosphere"))
+```
+
+```{r}
+trt.lines <- data.frame(Treatment = c("DS1", "DS2", "DS3"),
+                        Treatment2 = c("DS1", "DS2", "DS3"),
+                        Contrast = c("WC vs DS1", "WC vs DS2", "WC vs DS3"),
+                        IniTreatment = c(4.5, 4.5, 4.5),
+                        EndTreatment = c(5.5, 6.5, 7.5),
+                        IniTreatment2 = c(41,41,41),
+                        EndTreatment2 = c(52,62,74))
+```
+
+```{r}
+cv.plot <- train.set %>% 
+  unnest(cv, nOTU) %>% 
+  mutate(Compartment = fct_relevel(Compartment, "RS")) %>% 
+  mutate(Compartment = fct_recode(Compartment, Rhizosphere = "RS", Endosphere = "ES")) %>% 
+  ggplot(aes(nOTU, Error, color = Compartment)) +
+  geom_line(size =1) +
+  geom_point(aes(alpha = minError), size = 10) +
+  geom_text(aes(label = nOTU, alpha = minError), size = 6, color = "black") +
+  scale_color_manual(values = rev(cmp.pal)) +
+  scale_alpha_manual(values = c(0,1)) +
+  guides(alpha = F) +
+  scale_x_log10() +
+  theme_classic() +
+  theme(text = element_text(size = 15),
+        legend.position = c(0.5, 0.8),
+        legend.title = element_blank()) 
+
+cv.plot
+```
+
+
+Check taxonomy of the OTUs
+```{r}
+rf.ranks <- train.set %>% 
+  unnest(imp.tax) %>% 
+  mutate(cmpOTU = paste(Compartment, OTU_ID),
+         Rank = rank(PercIncMSE)) 
+
+rf.ranks %>% 
+  ggplot(aes(reorder(cmpOTU, Rank), PercIncMSE, fill = PhyClass2)) +
+  geom_bar(stat = "identity") +
+  xlab("OTU") +
+  scale_y_log10() +
+  coord_flip() +
+  scale_fill_manual(values = phy.pal) +
+  facet_wrap(~Compartment, scales = "free") +
+  theme_light() +
+  theme(text = element_text(size = 15),
+        axis.text.y = element_blank())
+```
+```{r}
+otu.rf <- train.set %>% 
+  unnest(imp.tax) %>% 
+  mutate(cmpOTU = paste(Compartment, OTU_ID),
+         Rank = rank(PercIncMSE))
+
+rs.id <- filter(otu.rf, Compartment == "Rhizosphere")$OTU_ID
+es.id <- filter(otu.rf, Compartment == "Endosphere")$OTU_ID
+
+# otu2 <- readRDS("../Data/otu_pers.RDS")
+# otu2 <- rel_ab(otu2)
+# otu2 <- log_norm(otu2)  
+otu.tidy <- tidy_otu(otu)
+
+get_order <- function(df, var) {
+  mtrx <- df %>% 
+    mutate(Group = paste(Compartment, Treatment, Time, sep = ".")) %>% 
+    select(Group, var, OTU_ID) %>% 
+    spread(key = Group, value = var)
+  mtrx <- as.data.frame(mtrx)
+  rownames(mtrx) <- mtrx$OTU_ID
+  mtrx <- mtrx[,-1]
+  dist.tmp <- dist(as.matrix(mtrx))
+  dist.clust <- hclust(dist.tmp, method = "average")
+  ord.names <- dist.clust$labels[dist.clust$order]
+  clust.ord <- data.frame(OTU_ID = ord.names, order = 1:length(ord.names))
+  df <- inner_join(df, clust.ord, by = "OTU_ID")
+  df$order
+}
+
+get_cluster <- function(df, var, nclust) {
+  mtrx <- df %>% 
+    mutate(Group = paste(Compartment, Treatment, Time, sep = ".")) %>% 
+    select(Group, var, OTU_ID) %>% 
+    spread(key = Group, value = var)
+  mtrx <- as.data.frame(mtrx)
+  rownames(mtrx) <- mtrx$OTU_ID
+  mtrx <- mtrx[,-1]
+  dist.tmp <- dist(as.matrix(mtrx))
+  dist.clust <- hclust(dist.tmp, method = "average")
+  ord.names <- dist.clust$labels[dist.clust$order]
+  clust.ord <- data.frame(OTU_ID = ord.names, order = 1:length(ord.names))
+  clust.cut <- cutree(dist.clust[c(1,2,4)], k = nclust)
+  clust.ord$Cluster <- as.factor(clust.cut[clust.ord$OTU_ID])
+  df <- inner_join(df, clust.ord, by = "OTU_ID")
+  df$Cluster
+}
+```
+
+```{r}
+es.master.tidy <- otu.tidy %>% 
+  inner_join(select(map, SampleID, Time, Compartment, Treatment), by = "SampleID") %>% 
+  filter(Compartment == "ES") %>% 
+  group_by(Compartment, Treatment, OTU_ID) %>% 
+  mutate(zscore = (Count - mean(Count))/sd(Count)) %>% 
+  group_by(Compartment, Treatment, Time, OTU_ID) %>% 
+  summarise(MeanZS = mean(zscore)) %>% 
+  ungroup()
+
+es.order <- es.master.tidy %>% 
+  filter(OTU_ID %in% es.id) %>% 
+  filter(Treatment == "WC") %>% 
+  mutate(ZS_order = get_order(., "MeanZS"),
+         ZS_cluster = get_cluster(., "MeanZS", 3)) %>% 
+  mutate(Trend = case_when(
+    ZS_cluster == 1 ~ "Complex",
+    ZS_cluster == 2 ~ "Early Colonizer",
+    ZS_cluster == 3 ~ "Late Colonizer"
+  ))
+
+es.plot.df <- es.master.tidy %>% 
+  inner_join(select(es.order, OTU_ID, ZS_order, ZS_cluster, Trend), by = "OTU_ID") %>% 
+  mutate(Treatment = fct_relevel(Treatment, "WC")) %>% 
+  inner_join(tax, by = "OTU_ID") %>% 
+  mutate(EndTreatment = case_when(
+           Treatment == "WC" ~ 4.5,
+           Treatment == "DS10" ~ 5.5,
+           Treatment == "DS20" ~ 6.5,
+           Treatment == "DS30" ~ 7.5,
+         ))
+```
+
+```{r}
+rs.master.tidy <- otu.tidy %>% 
+  inner_join(select(map, SampleID, Time, Compartment, Treatment), by = "SampleID") %>% 
+  filter(Compartment == "RS") %>% 
+  group_by(Compartment, Treatment, OTU_ID) %>% 
+  mutate(zscore = (Count - mean(Count))/sd(Count)) %>% 
+  group_by(Compartment, Treatment, Time, OTU_ID) %>% 
+  summarise(MeanZS = mean(zscore)) %>% 
+  ungroup()
+
+rs.order <- rs.master.tidy %>% 
+  filter(OTU_ID %in% rs.id) %>% 
+  filter(Treatment == "WC") %>% 
+  mutate(ZS_order = get_order(., "MeanZS"),
+        ZS_cluster = get_cluster(., "MeanZS", 3)) %>% 
+  mutate(Trend = case_when(
+    ZS_cluster == 3 ~ "Complex",
+    ZS_cluster == 1 ~ "Early Colonizer",
+    ZS_cluster == 2 ~ "Late Colonizer"
+  ))
+
+rs.plot.df <- rs.master.tidy %>% 
+  inner_join(select(rs.order, OTU_ID, ZS_order, ZS_cluster, Trend), by = "OTU_ID") %>% 
+  mutate(Treatment = fct_relevel(Treatment, "WC")) %>% 
+  inner_join(tax, by = "OTU_ID") %>% 
+  mutate(EndTreatment = case_when(
+           Treatment == "WC" ~ 4.5,
+           Treatment == "DS10" ~ 5.5,
+           Treatment == "DS20" ~ 6.5,
+           Treatment == "DS30" ~ 7.5,
+         ))
+```
+
+```{r}
+all.plot.df <- rbind(rs.plot.df, es.plot.df) %>% 
+  mutate(OTU_ID = paste(Compartment, OTU_ID))
+
+all.ord <- rbind(group_by(rs.order, Compartment, OTU_ID, ZS_cluster, Trend) %>% count(),
+                 group_by(es.order, Compartment, OTU_ID, ZS_cluster, Trend) %>% count())
+
+all.ord$Trend <- as.factor(all.ord$Trend)
+
+trend.p <- all.plot.df %>% 
+  mutate(Treatment = fct_recode(Treatment, WC = "WC", DS1 = "D1", DS2 = "D2", DS3 = "D3")) %>% 
+  mutate(Compartment = fct_relevel(Compartment, "RS")) %>% 
+  mutate(Compartment = fct_recode(Compartment, Rhizosphere = "RS", Endosphere = "ES")) %>% 
+  mutate(Trend = fct_relevel(Trend, "Complex", after = Inf)) %>% 
+  ggplot(aes(Time * 10, reorder(OTU_ID, ZS_order), fill = MeanZS)) +
+  geom_tile() +
+  geom_point(aes(x = -1, color = Trend)) +
+  geom_vline(data = trt.lines, aes(xintercept = (IniTreatment * 10)), linetype = 3) +
+  geom_vline(data = trt.lines, aes(xintercept = (EndTreatment* 10)), linetype = 3) +
+  scale_fill_gradientn(colors = RColorBrewer::brewer.pal(9, "Greys"),
+                       name = "Relative Abundance\n(z-score)") +
+  scale_color_manual(values = c("dodgerblue", "gold", "grey50")) +
+  ylab("Age Discriminant OTU") +
+  xlab("Plant Age (days)") +
+  theme_classic() +
+  theme(axis.text.y = element_blank(),
+        panel.grid = element_blank(),
+        text = element_text(size = 15),
+        legend.position = "bottom",
+        axis.line.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+  facet_grid(Compartment ~ Treatment, scales = "free", space = "free") +
+  guides(color = guide_legend(title.position = "top", title.hjust = 0.5))
+
+trend.p
+```
+
+```{r}
+rf.otus <- rbind(rs.plot.df, es.plot.df) %>% 
+  group_by(Compartment, OTU_ID, Trend, Kingdom, Phylum, Class, Order, Family, Genus, Species) %>% 
+  count() %>% 
+  select(-n) %>% 
+  ungroup()
+
+write.table(rf.otus, "../Tables/rf_otus.tsv", sep = "\t", quote = F, row.names = F)
+```
+
+
+```{r}
+overlap.plot <- all.plot.df  %>% 
+  separate(OTU_ID, c("tmp", "OTU_ID")) %>% 
+  select(OTU_ID, Compartment, Trend) %>% 
+  mutate(RFTrend = Trend) %>% 
+  select(-Trend) %>% 
+  group_by(OTU_ID, Compartment, RFTrend) %>% 
+  count() %>% 
+  select(-n) %>% 
+  left_join(all.clust.summary, by = c("Compartment", "OTU_ID")) %>% 
+  ungroup() %>% 
+  mutate(Compartment = fct_relevel(Compartment, "RS")) %>% 
+  mutate(Compartment = fct_recode(Compartment, Rhizosphere = "RS", Endosphere = "ES")) %>% 
+  mutate(Trend = ifelse(is.na(Trend), "None", Trend)) %>% 
+  mutate(Trend = fct_recode(Trend, 
+                            "Semi-Persistent\nEnrichment" = "Semi-Persistent Enrichment",
+                            "Persistent\nDepletion" = "Persistent Depletion",
+                            "Transient\nDepletion" = "Transient Depletion",
+                            "Transient\nEnrichment" = "Transient Enrichment")) %>% 
+  mutate(Trend = fct_relevel(Trend, "None", after = Inf)) %>% 
+  mutate(RFTrend = fct_relevel(RFTrend, "Early Colonizer", after = Inf)) %>% 
+  ggplot(aes(RFTrend, fill = Trend)) +
+  geom_bar() +
+  facet_grid(Compartment ~.) +
+  ylab("nOTU") +
+  xlab("") +
+  scale_fill_manual(name = "Drought Module",
+                    values = c(RColorBrewer::brewer.pal(4,"Dark2"), "gray69")) +
+  guides(fill = guide_legend(ncol = 1)) +
+  theme_classic() +
+  theme(text = element_text(size = 15),
+        legend.position = "right") +
+  coord_flip()
+
+overlap.plot
+```
+
+```{r}
+rf.tax <- all.plot.df %>% 
+  mutate(Compartment = fct_recode(Compartment, Rhizosphere = "RS", Endosphere = "ES")) %>% 
+  mutate(Compartment = fct_relevel(Compartment, "Rhizosphere")) %>% 
+  mutate(Trend = fct_relevel(Trend, "Complex", after = Inf)) %>% 
+  mutate(Trend = fct_recode(Trend, Early = "Early Colonizer", Late = "Late Colonizer")) %>% 
+  group_by(Compartment, Trend, OTU_ID) %>% 
+  count() %>% 
+  separate(OTU_ID, c("tmp", "OTU_ID")) %>% 
+  select(-n, -tmp) %>% 
+  inner_join(tax, by = "OTU_ID") %>% 
+  group_by(Compartment, Trend, PhyClass2, Phylum, Class, Order) %>% 
+  count() %>%
+  ggplot(aes(Trend, paste(Phylum, Class, Order, sep = " / "), fill = PhyClass2, label = n)) +
+  geom_tile(color = "white", size = 1) +
+  geom_text(color = "black", size = 3) +
+  scale_fill_manual(name = "Taxon",
+                    values = phy.pal,
+                    limits = levels(tax$PhyClass2)) +
+  ylab("Phylum / Class / Order") +
+  facet_grid(.~Compartment) +
+  theme_classic() +
+  theme(text = element_text(size = 15),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text.y = element_text(size = 10),
+        legend.position = "none",
+        panel.grid.major = element_line(colour = "gray90"),
+        axis.line.y = element_blank(),
+        axis.ticks.y = element_blank())
+  
+rf.tax
+```
+```{r}
+supp.left <- plot_grid(cv.plot,
+                       overlap.plot,
+                       nrow = 1,
+                       rel_widths = c(2,3),
+                       labels = c("A", "B"),
+                       label_size = 20)
+
+supp.left
+
+plot_grid(supp.left,
+          trend.p,
+          ncol = 1,
+          rel_heights = c(1,3),
+          labels = c(NA, "C"),
+          label_size = 20)
+```
+
+
+Run random forest using the top OTUs as predictors
+```{r}
+get_rf <- function(imp.predictors, response) {
+  randomForest(imp.predictors, response, importance = F, keep.forest = T)
+}
+
+train.set <- train.set %>% 
+  mutate(rf = map2(imp.otu, age, get_rf))
+
+
+train.set %>% 
+  filter(Compartment == "Rhizosphere") %>% 
+  .$rf
+
+train.set %>% 
+  filter(Compartment == "Endosphere") %>% 
+  .$rf
+```
+
+Use the whole dataset to get the predicted age of the plants
+```{r}
+get_predict <- function(model, data) {
+  predict(model, data)
+} 
+
+test.set <- whole.set %>% 
+  inner_join(select(train.set, Compartment, rf), by = "Compartment") %>% 
+  mutate(prediction = map2(rf, otu, get_predict)) 
+
+rs.pred <- test.set %>% unnest(prediction, age) %>% filter(Treatment == "WC") %>% filter(Compartment == "Rhizosphere") %>% .$prediction
+rs.age <- test.set %>% unnest(prediction, age) %>% filter(Treatment == "WC") %>% filter(Compartment == "Rhizosphere") %>% .$age
+cor(rs.pred, rs.age)
+
+es.pred <- test.set %>% unnest(prediction, age) %>% filter(Treatment == "WC") %>% filter(Compartment == "Endosphere") %>% .$prediction
+es.age <- test.set %>% unnest(prediction, age) %>% filter(Treatment == "WC") %>% filter(Compartment == "Endosphere") %>% .$age
+cor(es.pred, es.age)
+
+test.set %>% 
+  unnest(prediction, age) %>% 
+  ggplot(aes(age, prediction)) +
+  geom_point(aes(shape = Set, color = Treatment), alpha = 0.7) + 
+  geom_abline(linetype = 2) + 
+  geom_smooth(aes(color = Treatment), linetype = 2, stat = "smooth", se = F) +
+  scale_color_manual(values = trt.pal) +
+  facet_grid(Treatment + Set ~ Compartment) +
+  theme_light() +
+  theme(text = element_text(size = 20)) 
+```
+
+
+```{r}
+predictions <- test.set %>% 
+  unnest(prediction, age) 
+
+predictions.wc <- filter(predictions, Treatment == "WC" & Set == "Test") %>% select(-Treatment) %>% 
+  ungroup()
+
+predictions.wc.plotting <- rbind(select(predictions.wc, -Treatment) %>% mutate(Treatment = "DS1"),
+                                 select(predictions.wc, -Treatment) %>% mutate(Treatment = "DS2"),
+                                 select(predictions.wc, -Treatment) %>% mutate(Treatment = "DS3"))
+
+predictions %>% 
+  filter(Treatment != "WC") %>% 
+  mutate(Treatment = str_replace(Treatment, "D", "DS")) %>% 
+  mutate(Treatment = fct_relevel(Treatment, "WC")) %>% 
+  ggplot(aes(age, prediction)) +
+  geom_vline(data = trt.lines, aes(xintercept = IniTreatment2), linetype = 3) +
+  geom_vline(data = trt.lines, aes(xintercept = EndTreatment2), linetype = 3) +
+  geom_point(aes(color = Treatment), size = 2, shape = 1, alpha = 1) + 
+  geom_smooth(data = predictions.wc.plotting, linetype = 2,  size = 1, stat = "smooth", se = F, color = trt.pal[1]) +
+  xlab("Plant Age (days)") +
+  ylab("Microbiome Age\n(days)") +
+  scale_color_manual(values = trt.pal[-1]) +
+  facet_grid(Compartment ~ Treatment) +
+  theme_classic() +
+  theme(text = element_text(size = 20),
+        legend.position = "none") 
+```
+
+
+```{r}
+
+loess.pred <- rbind(
+  data.frame(loess = predict(loess(prediction~age,filter(predictions.wc, Compartment == "Rhizosphere")), unique(predictions.wc$age)),
+             age = unique(predictions.wc$age),
+             Compartment = "Rhizosphere"),
+  data.frame(loess = predict(loess(prediction~age,filter(predictions.wc, Compartment == "Endosphere")), unique(predictions.wc$age)),
+             age = unique(predictions.wc$age),
+             Compartment = "Endosphere"))
+
+predictions.wc %>% ggplot(aes(age, prediction, color = Compartment)) +
+                      geom_smooth(linetype = 2,  size = 1, stat = "smooth", se = F) +
+  geom_point(data = loess.pred, aes(age, loess))
+
+
+```
+```{r}
+library(broom)
+library(contrast)
+
+time.age <- map %>% 
+  group_by(Time, Age) %>% 
+  count() %>% 
+  select(-n) 
+
+predictions <- inner_join(predictions, time.age, by = c("age" = "Age"))
+predictions$TimeFctr <- as.factor(predictions$Time)
+
+run_lm <- function(df) {
+  lm(prediction ~ Treatment * TimeFctr, data = df)
+}
+
+run_anova <- function(fit) {
+  anova(fit) %>% tidy()
+}
+
+get_contrasts <- function(fit) {
+  contrasts <- vector(mode = "list")
+
+  for(i in 1:13) {
+    i <- as.character(i)
+    print(i)
+    contrasts[[paste("D1", i, sep = ".")]] <-  contrast(fit, list(Treatment = "WC", TimeFctr = i), list(Treatment = "D1", TimeFctr = i))[1:8] %>% as.data.frame()
+    contrasts[[paste("D2", i, sep = ".")]] <-  contrast(fit, list(Treatment = "WC", TimeFctr = i), list(Treatment = "D2", TimeFctr = i))[1:8] %>% as.data.frame()
+    contrasts[[paste("D3", i, sep = ".")]] <-  contrast(fit, list(Treatment = "WC", TimeFctr = i), list(Treatment = "D3", TimeFctr = i))[1:8] %>% as.data.frame()
+  }
+  
+  contrasts <- plyr::ldply(contrasts, function(x) x)
+  contrasts <- contrasts %>% 
+    separate(.id, c("Treatment", "Time"))
+}
+```
+
+```{r}
+predictions.nested <-predictions %>% 
+  group_by(Compartment) %>% 
+  nest() %>% 
+  mutate(lm = map(data, run_lm),
+         anova = map(lm, run_anova),
+         contrasts = map(lm, get_contrasts))
+
+rf.sig <- predictions.nested %>% 
+  unnest(contrasts) %>% 
+  group_by(Compartment, Treatment) %>% 
+  mutate(p.adj = p.adjust(Pvalue, method = "fdr")) %>% 
+  mutate(Time = as.integer(Time)) %>% 
+  inner_join(time.age, by = "Time") %>% 
+  ungroup()
+
+
+```
+
+```{r}
+a <- predictions %>% 
+  filter(Treatment != "WC") %>% 
+  mutate(Compartment = fct_relevel(Compartment, "RS", "ES")) %>% 
+  mutate(Compartment = fct_recode(Compartment, Rhizosphere = "RS", Endosphere = "ES")) %>% 
+  mutate(Treatment = str_replace(Treatment, "D", "DS")) %>% 
+  ggplot(aes(age, prediction)) +
+  geom_vline(data = trt.lines, aes(xintercept = IniTreatment2), linetype = 3) +
+  geom_vline(data = trt.lines, aes(xintercept = EndTreatment2), linetype = 3) +
+  geom_point(aes(color = Treatment), size = 2, shape = 1, alpha = 1) + 
+  geom_smooth(data = predictions.wc.plotting, linetype = 2,  size = 1, stat = "smooth", se = F, color = trt.pal[1]) +
+  xlab("Plant Age (days)") +
+  ylab("Microbiome Age\n(days)") +
+  scale_color_manual(values = trt.pal[-1]) +
+  facet_grid(Compartment ~ Treatment) +
+  theme_classic() +
+  theme(text = element_text(size = 15),
+        legend.position = "none") 
+
+a
+```
+
+
+```{r}
+
+
+b <- predictions %>%
+  filter(Treatment != "WC") %>% 
+  inner_join(loess.pred, by = c("Compartment", "age")) %>% 
+  mutate(RelMat = (prediction - loess)) %>% 
+  group_by(Compartment, Treatment, age) %>% 
+  summarise(MeanMat = mean(RelMat),
+            SDMat = sd(RelMat)) %>%
+  mutate(SEMat = SDMat/2) %>% 
+  inner_join(rf.sig, by = c("Compartment","Treatment", "age" = "Age")) %>% 
+  ungroup() %>% 
+  mutate(FDR = ifelse(p.adj < 0.05, "< 0.05", "≥ 0.05")) %>% 
+  mutate(Compartment = fct_relevel(Compartment, "RS", "ES")) %>% 
+  mutate(Compartment = fct_recode(Compartment, Rhizosphere = "RS", Endosphere = "ES")) %>% 
+  mutate(Treatment = str_replace(Treatment, "D", "DS")) %>% 
+  mutate(Treatment = fct_relevel(Treatment, "WC")) %>% 
+  ggplot(aes(age, MeanMat, color = Treatment, shape = FDR)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = MeanMat - SEMat, ymax = MeanMat + SEMat)) +
+  geom_vline(data = trt.lines, aes(xintercept = IniTreatment2), linetype = 3) +
+  geom_vline(data = trt.lines, aes(xintercept = EndTreatment2), linetype = 3) +
+  ylab("Relative Microbiome\nMaturity (days)") +
+  xlab("Plant Age (days)") +
+  facet_grid(Compartment ~ Treatment) +
+  scale_color_manual(values = trt.pal[-1]) +
+  scale_shape_manual(values = rev(ws.shp)) +
+  theme_classic() +
+  theme(text = element_text(size = 15),
+        legend.position = "bottom") +
+  guides(color = guide_legend(title.position = "top", title.hjust = 0.5),
+         shape = guide_legend(title.position = "top", title.hjust = 0.5))
+b
+```
+
+```{r}
+c <- otu.tidy %>% 
+  mutate(Count = Count/100) %>% 
+  inner_join(map, by = "SampleID") %>% 
+  filter(Treatment2 != "WC_TRN") %>% 
+  inner_join(all.ord, by = c("Compartment", "OTU_ID")) %>% 
+  group_by(Compartment, Treatment, Age, Time, ZS_cluster, Trend,  SampleID) %>% 
+  summarise(Total = sum(Count)) %>% 
+  group_by(Compartment, Treatment, Age, Time, ZS_cluster, Trend) %>% 
+  mutate(MeanAb = mean(Total)) %>% 
+  ungroup() %>% 
+  mutate(Trend = fct_relevel(Trend, "Complex", after = Inf)) %>% 
+  mutate(Compartment = fct_relevel(Compartment, "RS", "ES")) %>% 
+  mutate(Compartment = fct_recode(Compartment, Rhizosphere = "RS", Endosphere = "ES")) %>%
+  mutate(Treatment = str_replace(Treatment, "D", "DS")) %>% 
+  mutate(Treatment = fct_relevel(Treatment, "WC")) %>% 
+  ggplot(aes(Age, Total, fill = Trend, color = Trend)) +
+  geom_point(shape = 1, size = 2) +
+  geom_smooth(se = F) +
+  geom_vline(data = trt.lines, aes(xintercept = IniTreatment2), linetype = 3) +
+  geom_vline(data = trt.lines, aes(xintercept = EndTreatment2), linetype = 3) +
+  ylab("Relative Abundance") +
+  xlab("Plant Age (days)") +
+  scale_fill_manual(values = c("dodgerblue", "gold", "grey50")) +
+  scale_color_manual(values = c("dodgerblue", "gold", "grey50")) +
+  facet_grid(Treatment ~ Compartment) +
+  theme_classic() +
+  theme(text = element_text(size = 15),
+        legend.position = "bottom") +
+  guides(color = guide_legend(title.position = "top", title.hjust = 0.5),
+         fill = guide_legend(title.position = "top", title.hjust = 0.5))
+
+c
+```
+```{r}
+left <- plot_grid(a,b + theme(legend.position = "none"), get_legend(b),
+                  nrow = 3,
+                  rel_heights = c(4,4,1),
+                  labels = c("A", "B"),
+                  label_size = 20)
+
+right <- plot_grid(c + theme(legend.position = "none"), get_legend(c),
+                   nrow = 2,
+                   rel_heights = c(8,1),
+                   labels = "C",
+                   label_size = 20)
+
+##1011:849
+plot_grid(left, right,
+          rel_widths = c(3,2))
+```
+

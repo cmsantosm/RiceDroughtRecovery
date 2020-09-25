@@ -1,0 +1,405 @@
+```{r}
+source("../General/rmb_functions.R")
+source("../General/parameters.R")
+library(ggridges)
+library(ggtree)
+library(cowplot)
+library(tidyverse)
+```
+
+Load data
+```{r}
+otu <- readRDS("../Data/otu_pers.RDS")
+map <- readRDS("../Data/drought_map.RDS") %>% 
+  filter(Treatment2 != "WC_TRN")
+clstr <- readRDS("../Data/drought_clusters.RDS")
+tax <- readRDS("../Data/tax.RDS") %>% 
+  mutate(PhyClass2 = fct_recode(PhyClass2, "Low Abundance" = "other"))
+tree <- ape::read.tree("../General/97_otus.tree")  
+```
+
+
+```{r}
+otu <- rel_ab(otu)
+otu.tidy <- tidy_otu(otu)
+
+int.ids <- filter(clstr, Trend == "Semi-Persistent Enrichment") %>% 
+  inner_join(tax, by = "OTU_ID") %>%
+  filter(Phylum == "Actinobacteria") %>%
+  .$OTU_ID
+```
+
+```{r}
+trt.lines <- data.frame(Treatment = c("DS1", "DS2", "DS3"),
+                        IniTreatment = c(4.5, 4.5, 4.5),
+                        EndTreatment = c(5.5, 6.5, 7.5))
+```
+
+
+```{r}
+actino.tree <- phyloseq::prune_taxa(as.character(int.ids), tree) %>% 
+  treeio::as.phylo(.)
+
+actino.master <- tax %>%
+  filter(OTU_ID %in% int.ids) %>%
+  mutate(OTU_ID2 = OTU_ID)
+
+## One OTU is misclassified in GreenGenes so need to correct it
+actino.master <- actino.master %>% 
+  mutate(Genus = ifelse(OTU_ID == "535678", "unclassified", Genus))
+
+fams <- tax %>%
+  filter(OTU_ID %in% int.ids) %>%
+  select(Family, OTU_ID)
+
+actino.tree.p <- ggtree(actino.tree, ladderize = F) %<+% actino.master +
+  geom_tiplab(aes(label = paste(Genus, "\n(OTU: ", OTU_ID2, ")", sep =""), 
+                  color = Family), align = T, size = 4, hjust = -0.03) +
+  geom_tippoint(aes(color = Family), size = 4) +
+  xlim(0,0.4) +
+  scale_color_brewer(palette = "Dark2",
+                     limits = c(unique(fams$Family)),
+                     name = "Family") +
+  #xlab(".") +
+  guides(color = guide_legend(ncol = 2, title.position = "top")) +
+  theme(text = element_text(size = 15),
+        legend.position = "bottom") 
+
+actino.tree.p
+```
+
+```{r}
+oc.ab <- otu.tidy %>% 
+  filter(Count > 0) %>% 
+  mutate(Count = Count/100) %>% 
+  inner_join(map, by = "SampleID") %>% 
+  group_by(Compartment, OTU_ID) %>% 
+  summarise(MeanRelAb = mean(Count),
+            Occupancy = n()/208 * 100) %>% 
+  mutate(Compartment = fct_recode(Compartment,
+                                  "Rhizosphere" = "RS",
+                                  "Endosphere" = "ES")) %>% 
+  mutate(Compartment = fct_relevel(Compartment, "Rhizosphere")) %>% 
+  inner_join(tax, by = "OTU_ID")
+
+oc.ab.p <- oc.ab  %>% 
+  filter(!OTU_ID %in% int.ids) %>% 
+  ggplot(aes(MeanRelAb, Occupancy)) +
+  geom_point(shape = 1, color = "gray25", alpha = 0.5) +
+  geom_point(data = filter(oc.ab, OTU_ID %in% int.ids), shape = 16, aes(color = PhyClass), stroke = 1) +
+  geom_point(data = filter(oc.ab, OTU_ID %in% "1037355"), shape = 21, fill = phy.pal[3], color = "black", size = 3, stroke = 1) +
+  #geom_label(data = filter(oc.ab, OTU_ID %in% "1037355"), y = 80, label = "OTU 1037355",  alpha = 0.5, hjust = 0.8) +
+  # geom_label(data = filter(oc.ab, OTU_ID %in% "1037355"), label = expression(paste("OTU: 1037355","\n","(", italic("Streptomyces "), "sp.)", sep = "")), alpha = 0.5, hjust = 1) +
+   # geom_label(data = filter(oc.ab, OTU_ID %in% "1037355"), label = paste("OTU: 1037355","\n","(", expression(italic("Streptomyces ")), "sp.)", sep = ""), alpha = 0.5, hjust = 1) +
+  scale_x_log10(labels = scales::trans_format("log10", scales::math_format(10^.x))) +
+  # scale_fill_manual(name = "OTU",
+  #                    values = iso.pal[3:2]) +
+  scale_color_manual(name = "",
+                     values = phy.pal[3],
+                     labels = "Semi-Persistently Enriched\nActinobacteria") +
+  #guides(fill = guide_legend(ncol = 2, title.position = "top")) +
+  xlab("Mean Rel. Abund.\n(log10)") +
+  ylab("Occupancy (%Samples)") +
+  facet_grid(Compartment ~ ., scales = "free") +
+  theme_classic() +
+  theme(text = element_text(size = 15), 
+        legend.position = "bottom",
+        legend.title = element_blank())
+
+oc.ab.p
+```
+
+```{r}
+oc.ab %>% 
+  group_by(Compartment) %>% 
+  #arrange(MeanRelAb) %>% 
+  mutate(PercMean = percent_rank(MeanRelAb)) %>% 
+  filter(OTU_ID == "1037355")
+
+
+oc.ab %>% 
+  filter(OTU_ID == "1037355")
+```
+
+
+```{r}
+actino.order <- data_frame(OTU_ID = actino.tree$tip.label,
+                       order = length(actino.tree$tip.label):1)
+
+pers.df <- otu.tidy %>% 
+  filter(OTU_ID %in% int.ids) %>% 
+  inner_join(map, by = "SampleID") %>% 
+  group_by(Compartment, OTU_ID) %>% 
+  mutate(zscore = (Count - mean(Count))/sd(Count)) %>% 
+  group_by(Compartment, Treatment, Time, OTU_ID, Age) %>% 
+  summarise(MeanZS = mean(zscore)) %>% 
+  group_by(Compartment, OTU_ID) %>%
+  mutate(MeanZS2 = MeanZS + abs(min(MeanZS))) %>% 
+  ungroup() %>% 
+  inner_join(tax, by = "OTU_ID") %>% 
+  mutate(Treatment = str_replace(Treatment, "D", "DS")) %>% 
+  mutate(Treatment = fct_relevel(Treatment, "WC")) %>% 
+  mutate(Compartment = fct_relevel(Compartment, "RS")) %>% 
+  mutate(Compartment = fct_recode(Compartment, Rhizosphere = "RS", Endosphere = "ES")) %>% 
+  inner_join(actino.order, by = "OTU_ID") 
+
+pers.p <- pers.df %>% 
+  ggplot(aes(Age, Treatment, height = MeanZS2, fill = Treatment)) +
+  geom_ridgeline(alpha = .8, color = "white") +
+  geom_vline(xintercept = c(41,52,62,74), linetype = 3) +
+  scale_fill_manual(values = trt.pal, name = "Treatment") +
+  ylab("Differentially Abundant OTU") +
+  xlab("Plant Age (days)") +
+  facet_grid(order ~ Compartment, scales = "free", space = "free") +
+  ylab("") +
+  theme_classic()  +
+  guides(fill = guide_legend(ncol = 2, title.position = "top")) +
+  theme(text = element_text(size = 15),
+        axis.text.y = element_blank(),
+        strip.background.y = element_blank(),
+        strip.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        legend.position = "bottom")
+
+pers.p
+```
+
+```{r}
+ranked.ab <- otu.tidy %>% 
+  mutate(Count = Count/100) %>% 
+  inner_join(map, by = "SampleID") %>% 
+  group_by(Compartment, Time, Age, Treatment, OTU_ID) %>% 
+  summarise(MeanAb = mean(Count)) %>% 
+  group_by(Compartment, Time, Age, Treatment) %>% 
+  arrange(MeanAb) %>% 
+  mutate(ymax = cumsum(MeanAb),
+         nOTU = n()) %>% 
+  mutate(ymin = c(0, ymax[1:nOTU - 1])) %>% 
+  ungroup() %>% 
+  mutate(Streptomyces = OTU_ID == "1037355") %>% 
+  mutate(Compartment = fct_recode(Compartment,
+                                  "Rhizosphere" = "RS",
+                                  "Endosphere" = "ES")) %>% 
+  mutate(Compartment = fct_relevel(Compartment, "Rhizosphere")) %>% 
+  mutate(Treatment = str_replace(Treatment, "D", "DS")) %>% 
+  mutate(Treatment = fct_relevel(Treatment, "WC"))
+
+ranked.p <- ranked.ab %>% 
+  ggplot(aes(ymax=ymax, ymin=ymin, xmax= (Time + 0.4)*10, xmin= (Time - 0.4)*10)) +
+  geom_rect(color = "white", fill = "gray50", size = 0.045) +  
+  geom_rect(data = filter(ranked.ab, Streptomyces), aes(fill = Treatment), color = "black", size = 0.5) + 
+  geom_vline(data = trt.lines, aes(xintercept = IniTreatment*10), linetype = 3) +
+  geom_vline(data = trt.lines, aes(xintercept = EndTreatment*10), linetype = 3) +
+  facet_grid(Treatment ~ Compartment, scales = "free", space = "free") +
+  scale_fill_manual(values = trt.pal) +
+  xlab("Plant Age (days)") +
+  ylab("Ranked Relative Abundance") +
+  ggtitle(expression(paste(italic("Streptomyces "), "sp. (OTU: 1037355)"))) +  
+  theme_classic() +
+  theme(text = element_text(size = 15),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+  
+ranked.p
+
+ranked.p <- ranked.ab %>% 
+  ggplot(aes(ymax=ymax, ymin=ymin, xmax= (Time + 0.4)*10, xmin= (Time - 0.4)*10)) +
+  geom_rect(color = "white", fill = "gray50", size = 0.045) +  
+ # geom_rect(data = filter(ranked.ab, Streptomyces), aes(fill = Treatment), color = "black", size = 0.5) + 
+  #geom_rect(data = filter(ranked.ab, Streptomyces), aes(fill = phy.pal[3], color = "black"), size = 0.5) + 
+  geom_rect(data = filter(ranked.ab, Streptomyces), aes(fill = OTU_ID), color = "black", size = 0.5) + 
+  geom_vline(data = trt.lines, aes(xintercept = IniTreatment*10), linetype = 3) +
+  geom_vline(data = trt.lines, aes(xintercept = EndTreatment*10), linetype = 3) +
+  facet_grid(Compartment ~ Treatment, scales = "free", space = "free") +
+  #scale_fill_manual(values = trt.pal) +
+  scale_fill_manual(name = "",
+                    values = phy.pal[3],
+                    labels = expression(paste("OTU: 1037355 (", italic("Streptomyces "), "sp.)", sep = ""))) +
+  xlab("Plant Age\n(days)") +
+  ylab("Ranked Relative Abundance") +
+  #ggtitle(expression(paste(italic("Streptomyces "), "sp. (OTU: 1037355)"))) +  
+  theme_classic() +
+  theme(text = element_text(size = 15),
+        legend.position = "bottom",
+        legend.title = element_blank())
+
+ranked.ab %>% 
+  filter(OTU_ID == "1037355") %>% 
+  arrange(-MeanAb) %>% 
+  filter(Compartment == "Rhizosphere")
+
+otu.tidy %>% 
+  filter(OTU_ID == "1037355") %>% 
+  arrange(-Count) %>% 
+  inner_join(map, by = "SampleID")
+
+ranked.p
+```
+```{r}
+plot_grid(oc.ab.p, ranked.p, 
+          align = "h",
+          axis = "tb",
+          rel_widths = c(1,3),
+          labels = c("A", "B"),
+          label_size = 20)
+```
+
+```{r}
+#1072:809
+bottom <- plot_grid(get_legend(actino.tree.p),
+                    get_legend(pers.p),
+                    nrow = 1, 
+                    rel_widths = c(2,1))
+
+
+top <- plot_grid(actino.tree.p + theme(legend.position = "none"),
+                 pers.p + theme(legend.position = "none"), 
+                 nrow = 1,
+                 align = "h",
+                 axis = "tb",
+                 rel_widths = c(4,7))
+
+left <- plot_grid(top, bottom,
+                  ncol = 1,
+                  rel_heights = c(9,2),
+                  labels = "A",
+                  label_size = 20)
+
+plot_grid(left, ranked.p, 
+          nrow = 1,
+          rel_widths = c(3,2),
+          labels = c(NA,"B"),
+          label_size = 20)
+```
+
+```{r}
+isolates <- readRDS("../Data/isolates.RDS")
+
+iso.tree <- phyloseq::prune_taxa(isolates$OTU_ID, tree) %>% treeio::as.phylo(.)
+
+iso.master <- isolates %>% 
+  group_by(OTU_ID) %>% 
+  count() %>% 
+  inner_join(tax, by = "OTU_ID") %>% 
+  mutate(SPE = OTU_ID %in% int.ids) %>% 
+  as.data.frame() %>% 
+  mutate(OTU_ID2 = OTU_ID)
+
+iso.tree.plot <- ggtree(iso.tree, ladderize = F) %<+% iso.master +
+  geom_tippoint(aes(), size = 3) +
+  geom_tiplab(aes(color = SPE, label = paste(Family, Genus, "\nOTU:", OTU_ID2)), align = T, size = 3) +
+  scale_color_manual(values = c("black", "red")) +
+  #xlab(".") +
+  xlim(c(0,0.75)) +
+  theme_classic() +
+  theme(text = element_text(size = 15),
+        axis.text = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_blank(),
+        legend.position = "none")
+
+iso.tree.plot
+
+iso.n <- data.frame(id = iso.tree$tip.label) %>% 
+  rename("OTU_ID" = "id") %>% 
+  mutate(order = 1:nrow(.)) %>% 
+  inner_join(isolates, by = "OTU_ID") %>% 
+  group_by(OTU_ID, order) %>% 
+  count() %>% 
+  ungroup()
+
+bar.plot <- iso.n %>% 
+  mutate(SPE = OTU_ID %in% int.ids) %>% 
+  ggplot(aes(reorder(OTU_ID, order), n, fill = SPE)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  xlab("") +
+  ylab("Number of isolates") +
+  scale_fill_manual(values = c("black", "red")) +
+  theme_classic() +
+  theme(text = element_text(size = 15),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = c(0.8, 0.8))
+
+
+bar.plot
+
+plot_grid(iso.tree.plot, bar.plot, 
+          align = "h", 
+          axis = "b")
+```
+
+
+```{r}
+iso.pal <- wesanderson::wes_palette(name = "Zissou1", n = 5, type = "discrete")[c(1,3,5)]
+
+seqs <- readRDS("../Data/actino_seqs.RDS")
+
+seq.p <- seqs %>%
+  select(-(OTU.major.sequence:SLBN.111)) %>%
+  gather("Isolate","match",OTU.major.seq:`SLBN-111`) %>%
+  mutate(Isolate = fct_recode(Isolate,
+                              "OTU: 1037355\nPrevalent Seq" = "OTU.major.seq")) %>% 
+  mutate(Isolate = fct_relevel(Isolate,
+                               "OTU: 1037355\nPrevalent Seq",
+                               "SLBN-197",
+                               "SLBN-175",
+                               "SLBN-134",
+                               "SLBN-193",
+                               "SLBN-191",
+                               "SLBN-186",
+                               "SLBN-177",
+                               "SLBN-162",
+                               "SLBN-161",
+                               "SLBN-111")) %>%
+  ggplot(.,aes(x=Position,y=1,fill=match))+
+  geom_tile()+
+  facet_grid(Isolate~.)+
+  scale_fill_manual(values=c("black","grey80"))+
+  theme_minimal()+
+  theme(text = element_text(size = 15),
+        strip.text.y = element_text(angle = 0,hjust=0, size = 10),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.y = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.position="none")
+
+seq.p
+
+oc.ab <- otu.tidy %>% 
+  filter(Count > 0) %>% 
+  mutate(Count = Count/100) %>% 
+  inner_join(map, by = "SampleID") %>% 
+  group_by(Compartment, OTU_ID) %>% 
+  summarise(MeanRelAb = mean(Count),
+            Occupancy = n()/208 * 100) %>% 
+  mutate(Compartment = fct_recode(Compartment,
+                                  "Rhizosphere" = "RS",
+                                  "Endosphere" = "ES")) %>% 
+  mutate(Compartment = fct_relevel(Compartment, "Rhizosphere"))
+
+oc.ab.p <- oc.ab  %>% 
+  ggplot(aes(MeanRelAb, Occupancy)) +
+  geom_point(shape = 1, color = "gray25", alpha = 0.5) +
+  geom_point(data = filter(oc.ab, OTU_ID %in% c("1037355", "1108350")), aes(fill = OTU_ID), shape = 21, color = "white", size = 3) +
+  scale_x_log10() +
+  scale_fill_manual(name = "OTU",
+                     values = iso.pal[3:2]) +
+  xlab("Mean Rel. Abund.\n(log10)") +
+  ylab("Occupancy\n(%Samples)") +
+  facet_wrap(~ Compartment) +
+  theme_classic() +
+  theme(text = element_text(size = 15))
+```
+```{r}
+plot_grid(seq.p, oc.ab.p,
+          ncol = 1,
+          labels = c("A", "B"),
+          label_size = 20)
+```
+
