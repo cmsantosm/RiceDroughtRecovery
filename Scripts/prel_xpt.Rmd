@@ -11,8 +11,8 @@ library(tidyverse)
 prel.map <- readRDS("../Data/drought_prel_map.RDS")
 prel.otu <- readRDS("../Data/otu_prel.RDS")
 prel.trt.lines <- data.frame(Treatment = "DS",
-                        IniTreatment = 31.5,
-                        EndTreatment = 52.5)
+                        IniTreatment = 28,
+                        EndTreatment = 49)
 
 tree <- read_tree("../General/97_otus.tree")
 
@@ -46,7 +46,6 @@ prel.xpt.p <- prel.xpt.ds %>%
   geom_vline(xintercept = c(28,49), linetype = 3) +
   xlab("Plant Age (days)") +
   scale_color_manual(values = trt.pal[c(3,1)]) +
-  #scale_y_discrete(limits = c("DS3", "DS2", "DS1", "WC")) +
   scale_linetype_manual(values = c(1,3)) +
   theme_classic() +
   theme(text = element_text(size = 15),
@@ -56,49 +55,37 @@ prel.xpt.p <- prel.xpt.ds %>%
         legend.position = "none")
 prel.xpt.p
 ```
-
 ```{r}
-prel.ranked.ab <- prel.otu.tidy %>% 
+library(ggalluvial)
+
+tmp <- prel.otu.tidy %>% 
   mutate(Count = Count/100) %>% 
   inner_join(prel.map, by = "SampleID") %>% 
   group_by(Compartment, Time, Age, Treatment, OTU_ID) %>% 
   summarise(MeanAb = mean(Count)) %>% 
-  group_by(Compartment, Time, Age, Treatment) %>% 
-  arrange(MeanAb) %>% 
-  mutate(ymax = cumsum(MeanAb),
-         nOTU = n()) %>% 
-  mutate(ymin = c(0, ymax[1:nOTU - 1])) %>% 
   ungroup() %>% 
-  mutate(Streptomyces = OTU_ID == "1037355") %>% 
+  filter(MeanAb > 0) %>% 
+  mutate(Treatment = fct_relevel(Treatment, "WC")) %>% 
   mutate(Compartment = fct_recode(Compartment,
                                   "Rhizosphere" = "RS",
                                   "Endosphere" = "ES")) %>% 
-  mutate(Compartment = fct_relevel(Compartment, "Rhizosphere")) %>% 
-  mutate(Treatment = fct_relevel(Treatment, "WC"))
+  mutate(Compartment = fct_relevel(Compartment, "Rhizosphere"))
 
-
-prel.ranked.p <- prel.ranked.ab %>% 
-  ggplot(aes(ymax=ymax, ymin=ymin, xmax= Age + 3, xmin= Age - 3)) +
-  geom_rect(color = "white", fill = "gray50", size = 0.045) +  
-  #geom_rect(data = filter(prel.ranked.ab, Streptomyces), aes(fill = Treatment), color = "black", size = 0.5) + 
-  geom_rect(data = filter(prel.ranked.ab, Streptomyces), aes(fill = OTU_ID), color = "black", size = 0.5) + 
+prel.ranked.p <- tmp %>% 
+  ggplot(aes(Age, MeanAb, alluvium = OTU_ID)) +
+  geom_alluvium(aes(fill = OTU_ID == "1037355", color = OTU_ID == "1037355", alpha = OTU_ID == "1037355"), decreasing = F, size = 0.25) +
   geom_vline(data = prel.trt.lines, aes(xintercept = IniTreatment), linetype = 3) +
   geom_vline(data = prel.trt.lines, aes(xintercept = EndTreatment), linetype = 3) +
-  facet_grid(Treatment ~ Compartment, scales = "free", space = "free") +
-  #scale_fill_manual(values = trt.pal[c(1,3)]) +
-  scale_fill_manual(values = phy.pal[3],
-                    labels = expression(paste("OTU: 1037355 (", italic("Streptomyces "), "sp.)", sep = ""))) +
+  facet_grid(Compartment ~ Treatment, scales = "free", space = "free") +
+  scale_fill_manual(name = expression(paste("OTU: 1037355 (", italic("Streptomyces "), "sp.)", sep = "")), values = c("white", phy.pal[3])) + 
+  scale_color_manual(name = expression(paste("OTU: 1037355 (", italic("Streptomyces "), "sp.)", sep = "")), values = c("gray50", "black")) + 
+  scale_alpha_manual(name = expression(paste("OTU: 1037355 (", italic("Streptomyces "), "sp.)", sep = "")), values = c(0.5, 1)) +
   xlab("Plant Age (days)") +
   ylab("Ranked Relative Abundance") +
-  #ggtitle(expression(paste(italic("Streptomyces "), "sp. (OTU: 1037355)"))) +  
   theme_classic() +
   theme(text = element_text(size = 15),
         legend.position = "bottom",
         plot.title = element_text(hjust = 0.5))
-
-prel.ranked.ab %>% 
-  filter(OTU_ID == "1037355") %>% 
-  arrange(-MeanAb)
 
 prel.ranked.p
 ```
@@ -110,7 +97,7 @@ left <- plot_grid(prel.xpt.p, prel.ranked.p,
           labels = c("A", "B"),
           label_size = 20)
 
-left
+#left
 ```
 
 ```{r}
@@ -194,6 +181,7 @@ es.p <- es.pcoa.axes %>%
 
 es.p
 ```
+
 ```{r}
 right <- plot_grid(rs.p, es.p,
                    ncol = 1,
@@ -204,6 +192,6 @@ right
 ```
 
 ```{r}
-plot_grid(left, right)
+plot_grid(left, right, rel_widths = c(4,3))
 ```
 

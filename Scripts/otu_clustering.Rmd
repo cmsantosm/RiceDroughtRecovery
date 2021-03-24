@@ -21,7 +21,7 @@ map <- readRDS("../Data/drought_map.RDS")
 rs.fc <- readRDS("../Data/rs_shlfc.RDS")
 es.fc <- readRDS("../Data/es_shlfc.RDS")
 tax <- readRDS("../Data/tax.RDS") %>% 
-  mutate(PhyClass2 = fct_recode(PhyClass2, "Low Abundance" = "other"))
+  mutate(PhyClass2 = fct_recode(PhyClass2, "Low abundance" = "other"))
 ```
 
 Remove RF training set from mapping file. Subset mapping files for each compartment
@@ -51,14 +51,22 @@ Get significant OTUs for each set
 rs.sig <- rs.fc %>% 
   select(-Day) %>% 
   separate(Contrast, c("Treatment", "Time"), sep = "\\.") %>% 
-  filter(p.adjusted < 0.05) %>% 
-  filter(Treatment != "WC_TRN") 
+  filter(Treatment != "WC_TRN") %>% 
+  filter(!is.na(p.adjusted)) %>% 
+  ungroup() %>% 
+  mutate(p.adjusted2 = p.adjust(p.value, method = "fdr")) %>%
+  ungroup() %>% 
+  filter(p.adjusted2 < 0.05)
 
 es.sig <- es.fc %>% 
   select(-Day) %>% 
   separate(Contrast, c("Treatment", "Time"), sep = "\\.") %>% 
-  filter(p.adjusted < 0.05) %>% 
-  filter(Treatment != "WC_TRN") 
+  filter(Treatment != "WC_TRN") %>% 
+  filter(!is.na(p.adjusted)) %>% 
+  ungroup() %>% 
+  mutate(p.adjusted2 = p.adjust(p.value, method = "fdr")) %>%
+  ungroup() %>% 
+  filter(p.adjusted2 < 0.05)
 ```
 
 For visualization purposes, generate a data frame with the range of drought stress time points for each treatment 
@@ -86,11 +94,11 @@ dao.p <- all.sig %>%
   geom_vline(data = trt.lines, aes(xintercept = IniTreatment * 10), linetype = 3) +
   geom_vline(data = trt.lines, aes(xintercept = EndTreatment * 10), linetype = 3) +
   scale_fill_manual(values = resp.pal) +
-  xlab("Plant Age (days)") +
+  xlab("Plant age (days)") +
   ylab("Number of OTUs") +
   facet_grid(. ~ Compartment + Contrast) +
   theme_classic() +
-  theme(text = element_text(size = 15))
+  theme(text = element_text(size = 12))
 
 dao.p
 ```
@@ -107,12 +115,11 @@ dao.supp <- all.sig %>%
   select(-Treatment) %>% 
   inner_join(time.age, by = "Time") %>% 
   select(Compartment, Contrast, Time, Age, everything()) %>% 
-  inner_join(tax, by = "OTU_ID") %>% 
-  select(-PhyClass, -PhyClass2)
+  select(-p.adjusted) %>% 
+  rename("p.adjusted" = "p.adjusted2") 
 
-write.table(dao.supp, "../Tables/dao.tsv", sep = "\t", quote = F, row.names = F)
+write.table(dao.supp, "../Tables/dao_updated.tsv", sep = "\t", quote = F, row.names = F)
 ```
-
 
 Define the clustering methods to test
 ```{r}
@@ -134,16 +141,6 @@ rs.zs.tidy <- rs.otu.tidy %>%
   summarise(MeanZS = mean(zscore)) %>%
   ungroup()
 
-rs.zs.mtx <- rs.zs.tidy %>% 
-    mutate(Group = paste(Treatment, Time, sep = ".")) %>% 
-    select(Group, MeanZS, OTU_ID) %>% 
-    spread(key = Group, value = MeanZS)
-rs.zs.mtx <- as.data.frame(rs.zs.mtx) 
-rownames(rs.zs.mtx) <- rs.zs.mtx$OTU_ID 
-rs.zs.mtx <- rs.zs.mtx[,-1] 
-
-###################################################################
-
 rs.fc.mtx <- rs.fc %>% 
   separate(Contrast, c("Treatment2", "Time"), sep = "\\.") %>% 
   mutate(Treatment = Treatment2) %>% 
@@ -161,17 +158,6 @@ Choose a clustering method and number of clusters
 Approach based on: https://uc-r.github.io/hc_clustering
 ```{r}
 # See what values of k might be worth testing
-fviz_nbclust(rs.zs.mtx, FUN = hcut, method = "wss")
-
-# See which method gets you the best clustering
-rs.ac <- function(x) {
-  agnes(rs.zs.mtx, method = x)$ac
-}
-map_dbl(m, rs.ac)
-
-
-###################################################################
-# See what values of k might be worth testing
 fviz_nbclust(rs.fc.mtx, FUN = hcut, method = "wss")
 
 # See which method gets you the best clustering
@@ -184,25 +170,6 @@ map_dbl(m, rs.ac)
 It seems the elbow is around 3 so test 2:4 by changing the value of the rs.k variable
 Perform hierarchical clustering and get the set of clusters and order of OTUs
 ```{r}
-rs.k <- 4
-
-rs.dist <- dist(as.matrix(rs.zs.mtx)) 
-rs.clust <- hclust(rs.dist, method = "ward.D") 
-rs.ord.names <- rs.clust$labels[rs.clust$order] 
-rs.ord <- data.frame(OTU_ID = rs.ord.names, order = 1:length(rs.ord.names))
-
-rs.cut <- cutree(rs.clust[c(1,2,4)], k = rs.k)
-rs.ord$Cluster <- as.factor(rs.cut[rs.ord$OTU_ID])
-
-rs.ord <- rs.ord %>% 
-  mutate(Cluster = paste("C", Cluster, sep = "")) %>% 
-  group_by(Cluster) %>% 
-  mutate(nOTU = n()) %>% 
-  ungroup() %>% 
-  mutate(Cluster2 = paste(Cluster, " (", nOTU, " OTUs)", sep = ""))
-
-###################################################################
-
 rs.k <- 4
 
 rs.dist <- dist(as.matrix(rs.fc.mtx)) 
@@ -223,16 +190,15 @@ rs.ord <- rs.ord %>%
 
 Visualize as heatmap
 ```{r}
-rs.hm.p <- rs.zs.tidy %>% 
-  inner_join(rs.ord, by = "OTU_ID") %>% 
-  mutate(Treatment = str_replace(Treatment, "D", "DS")) %>% 
-  mutate(Treatment = fct_relevel(Treatment, "WC")) %>% 
+rs.hm.p <- rs.zs.tidy %>%
+  inner_join(rs.ord, by = "OTU_ID") %>%
+  mutate(Treatment = str_replace(Treatment, "D", "DS")) %>%
+  mutate(Treatment = fct_relevel(Treatment, "WC")) %>%
   ggplot(aes(Time*10, reorder(OTU_ID, order), fill = MeanZS)) +
   geom_tile() +
   geom_vline(data = trt.lines, aes(xintercept = IniTreatment*10), linetype = 3, color = "white") +
   geom_vline(data = trt.lines, aes(xintercept = EndTreatment*10), linetype = 3, color = "white") +
   scale_fill_viridis_c(name = "Mean Rel. Abund.\n(z-score)") +
-  #scale_fill_distiller(palette = "Spectral") +
   ylab("Differentially Abundant OTU") +
   xlab("Plant Age (days)") +
   facet_grid(Cluster ~ Treatment, scales = "free", space = "free") +
@@ -333,16 +299,6 @@ es.zs.tidy <- es.otu.tidy %>%
   summarise(MeanZS = mean(zscore)) %>%
   ungroup()
 
-es.zs.mtx <- es.zs.tidy %>% 
-    mutate(Group = paste(Treatment, Time, sep = ".")) %>% 
-    select(Group, MeanZS, OTU_ID) %>% 
-    spread(key = Group, value = MeanZS)
-es.zs.mtx <- as.data.frame(es.zs.mtx) 
-rownames(es.zs.mtx) <- es.zs.mtx$OTU_ID 
-es.zs.mtx <- es.zs.mtx[,-1] 
-
-###################################################################
-
 es.fc.mtx <- es.fc %>% 
   separate(Contrast, c("Treatment2", "Time"), sep = "\\.") %>% 
   mutate(Treatment = Treatment2) %>% 
@@ -358,14 +314,6 @@ es.fc.mtx <- es.fc.mtx[,-1]
 
 Choose a clustering method and number of clusters
 ```{r}
-fviz_nbclust(es.zs.mtx, FUN = hcut, method = "wss")
-
-es.ac <- function(x) {
-  agnes(es.zs.mtx, method = x)$ac
-}
-map_dbl(m, es.ac)
-
-###################################################################
 # See what values of k might be worth testing
 fviz_nbclust(es.fc.mtx, FUN = hcut, method = "wss")
 
@@ -378,26 +326,6 @@ map_dbl(m, es.ac)
 
 Perform hierarchical clustering and get the set of clusters and order of OTUs
 ```{r}
-es.k <- 6
-
-
-es.dist <- dist(as.matrix(es.zs.mtx)) 
-es.clust <- hclust(es.dist, method = "ward.D") 
-es.ord.names <- es.clust$labels[es.clust$order] 
-es.ord <- data.frame(OTU_ID = es.ord.names, order = 1:length(es.ord.names))
-
-es.cut <- cutree(es.clust[c(1,2,4)], k = es.k)
-es.ord$Cluster <- as.factor(es.cut[es.ord$OTU_ID])
-
-es.ord <- es.ord %>% 
-  mutate(Cluster = paste("C", Cluster, sep = "")) %>% 
-  group_by(Cluster) %>% 
-  mutate(nOTU = n()) %>% 
-  ungroup() %>% 
-  mutate(Cluster2 = paste(Cluster, " (", nOTU, " OTUs)", sep = ""))
-
-###################################################################
-
 es.k <- 5
 
 es.dist <- dist(as.matrix(es.fc.mtx)) 
@@ -518,53 +446,6 @@ plot_grid(es.hm.p, es.clstr.p,
 ```{r}
 all.ord <- rbind(mutate(rs.ord, Compartment = "RS"),
                  mutate(es.ord, Compartment = "ES"))
-
-rbind(mutate(rs.fc, Compartment = "RS"),
-      mutate(es.fc, Compartment = "ES")) %>% 
-  separate(Contrast, c("Treatment2", "Time"), sep = "\\.", remove = F) %>% 
-  mutate(Treatment = Treatment2) %>% 
-  filter(Treatment2 != "WC_TRN") %>% 
-  mutate(Time = as.numeric(Time)) %>% 
-  inner_join(all.ord, by = c("Compartment", "OTU_ID")) %>% 
-  mutate(Contrast = case_when(Treatment == "D1" ~ "WC vs DS1",
-                              Treatment == "D2" ~ "WC vs DS2",
-                              Treatment == "D3" ~ "WC vs DS3")) %>% 
-  mutate(Compartment = fct_relevel(Compartment, "RS")) %>% 
-  mutate(estimate2 = ifelse(abs(estimate) >4, 4 * sign(estimate), estimate)) %>% 
-  ggplot(aes(Time*10, reorder(OTU_ID, order), fill = estimate2)) +
-  geom_tile() +
-  geom_vline(data = trt.lines, aes(xintercept = IniTreatment * 10), linetype = 3) +
-  geom_vline(data = trt.lines, aes(xintercept = EndTreatment * 10), linetype = 3) +
-  #scale_fill_viridis_c(name = "Mean Rel. Abund.\n(z-score)") +
-  scale_fill_gradientn(name = "log2FC",
-                       colors = RColorBrewer::brewer.pal(11, "BrBG")) +
-  #scale_fill_distiller(palette = "Spectral") +
-  ylab("Differentially Abundant OTU") +
-  xlab("Plant Age (days)") +
-  facet_grid(Compartment + Cluster ~ Contrast, scales = "free", space = "free") +
-  theme_classic() +
-  theme(text = element_text(size = 15),
-        axis.text.y = element_blank(),
-        axis.ticks.y = element_blank(),
-        axis.line.y = element_blank(),
-        legend.position = "bottom",
-        legend.title.align = 1)
-
-all.ord %>% 
-  inner_join(tax, by = "OTU_ID") %>% 
-  ggplot(aes(1, fill = PhyClass2)) +
-  geom_bar(position = "stack") +
-  facet_grid(Compartment + Cluster ~ ., scales = "free", space = "free") +
-  scale_fill_manual(name = "Taxon",
-                    values = phy.pal[c(11:14,2:10,1)],
-                    limits = levels(tax$PhyClass2)[c(11:14,2:10,1)]) +
-  theme_classic() +
-  theme(text = element_text(size = 15),
-        axis.text.y = element_blank(),
-        axis.ticks.y = element_blank(),
-        axis.line.y = element_blank(),
-        legend.position = "bottom",
-        legend.title.align = 1)
 ```
 
 
@@ -575,11 +456,11 @@ all.clust.summary <- rbind(mutate(rs.ord, Compartment = "RS"),
                            mutate(es.ord, Compartment = "ES")) %>% 
   mutate(Cluster = paste(Compartment, Cluster, sep = "")) %>%
   filter(Cluster %in% c("RSC1", "RSC2", "RSC4", "ESC3", "ESC5")) %>% 
-  mutate(Trend = case_when(Cluster == "RSC1" ~ "Transient Enrichment",
-                           Cluster == "RSC2" ~ "Persistent Depletion",
-                           Cluster == "RSC4" ~ "Transient Depletion",
-                           Cluster == "ESC3" ~ "Semi-Persistent Enrichment",
-                           Cluster == "ESC5" ~ "Persistent Depletion")) 
+  mutate(Trend = case_when(Cluster == "RSC1" ~ "Transient depletion",
+                           Cluster == "RSC2" ~ "Transient enrichment",
+                           Cluster == "RSC4" ~ "Persistent depletion",
+                           Cluster == "ESC3" ~ "Semi-persistent enrichment",
+                           Cluster == "ESC5" ~ "Persistent depletion")) 
 
 all.cluster.total <- all.clust.summary %>% 
   group_by(Cluster, nOTU, Cluster2, Compartment, Trend) %>% 
@@ -595,35 +476,7 @@ all.agg.ra <- rbind(mutate(rs.agg.ra, Compartment = "RS"),
                     mutate(es.agg.ra, Compartment = "ES")) %>% 
   mutate(Cluster = paste(Compartment, Cluster, sep = ""))
 
-saveRDS(all.clust.summary, "../Data/drought_clusters.RDS")
-
-###############################################################################
-
-all.clust.summary <- rbind(mutate(rs.ord, Compartment = "RS"), 
-                           mutate(es.ord, Compartment = "ES")) %>% 
-  mutate(Cluster = paste(Compartment, Cluster, sep = "")) %>%
-  filter(Cluster %in% c("RSC1", "RSC2", "RSC4", "ESC3", "ESC4")) %>% 
-  mutate(Trend = case_when(Cluster == "RSC1" ~ "Transient Enrichment",
-                           Cluster == "RSC2" ~ "Transient Depletion",
-                           Cluster == "RSC4" ~ "Persistent Depletion",
-                           Cluster == "ESC3" ~ "Semi-Persistent Enrichment",
-                           Cluster == "ESC4" ~ "Persistent Depletion")) 
-
-all.cluster.total <- all.clust.summary %>% 
-  group_by(Cluster, nOTU, Cluster2, Compartment, Trend) %>% 
-  count() %>% 
-  select(-n) %>% 
-  ungroup() %>% 
-  mutate(Compartment = fct_recode(Compartment, 
-                                  "Rhizosphere" = "RS",
-                                  "Endosphere" = "ES")) %>% 
-  mutate(Compartment = fct_relevel(Compartment, "Rhizosphere"))
-
-all.agg.ra <- rbind(mutate(rs.agg.ra, Compartment = "RS"),
-                    mutate(es.agg.ra, Compartment = "ES")) %>% 
-  mutate(Cluster = paste(Compartment, Cluster, sep = ""))
-
-saveRDS(all.clust.summary, "../Data/drought_clusters.RDS")
+saveRDS(all.clust.summary, "../Data/drought_clusters_updated.RDS")
 ```
 
 ```{r}
@@ -664,17 +517,17 @@ all.cluster.tax <- all.clust.summary %>%
 ```{r}
 all.ab <- all.cluster.ab %>% 
   ggplot(aes(Age, AggRelAb, color = Treatment2)) +
-  geom_point(alpha = 1, shape = 1, size = 2) +
+  geom_point(alpha = 1, shape = 1, size = 1.5) +
   geom_vline(xintercept = ws.line, linetype = 3) +
   geom_line(data = all.cluster.means, aes(y = MeanRelAb), size = 1) + 
-  ylab("Cumulative Relative Abundance") +
-  xlab("Plant Age (days)") +
+  ylab("Cumulative relative abundance") +
+  xlab("Plant age (days)") +
   facet_wrap(~ Compartment + Trend, scales = "free") +
   scale_color_manual(values = trt.pal, name = "Treatment") +
   guides(color = guide_legend(title.position = "top", title.hjust = 0.5)) +
   theme_classic() +
   theme(legend.position = c(0.8,0.2),
-        text = element_text(size = 15))
+        text = element_text(size = 12))
 
 all.ab
 
@@ -697,7 +550,7 @@ all.tax.p <- all.cluster.tax %>%
   xlim(c(2, 4)) +
   facet_wrap(. ~ Compartment + Trend, nrow = 1) +
   theme_void() +
-  theme(text = element_text(size = 15),
+  theme(text = element_text(size = 12),
         legend.position = "bottom",
         legend.title = element_blank(),
         strip.background = element_blank(),
@@ -733,26 +586,38 @@ all.cluster.tax %>%
                     values = phy.pal,
                     limits = levels(tax$PhyClass2)) +
   facet_grid(. ~ Compartment, scales = "free", space = "free") +
-  theme_minimal() +
+  theme_classic() +
   theme(text = element_text(size = 15),
-        axis.text.x = element_text(angle = 45, hjust = 1))
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid.major = element_line(colour = "gray90"),
+        legend.position = "none",
+        axis.line.y = element_blank(),
+        axis.ticks.y = element_blank())
 ```
 
 
 ```{r}
+silva.class <- read.table("../Data/gg.otu2silva.tax.txt", header = T, sep = "\t", quote = "", comment.char = "") %>% mutate(OTU_ID = as.character(OTU_ID))
+
+all.clust.summary %>% 
+  group_by(Cluster, Trend) %>% 
+  count()
+
 supp.clust.summary <- rbind(mutate(rs.ord, Compartment = "RS"), 
                            mutate(es.ord, Compartment = "ES")) %>% 
   mutate(Cluster = paste(Compartment, Cluster, sep = "")) %>%
-  #filter(Cluster %in% c("RSC1", "RSC2", "RSC4", "ESC3", "ESC4")) %>% 
-  mutate(Trend = case_when(Cluster == "RSC1" ~ "Transient Enrichment",
-                           Cluster == "RSC2" ~ "Transient Depletion",
-                           Cluster == "RSC4" ~ "Persistent Depletion",
-                           Cluster == "ESC3" ~ "Semi-Persistent Enrichment",
-                           Cluster == "ESC4" ~ "Persistent Depletion")) %>% 
+  mutate(Trend = case_when(Cluster == "RSC1" ~ "Transient depletion",
+                           Cluster == "RSC2" ~ "Transient enrichment",
+                           Cluster == "RSC4" ~ "Persistent depletion",
+                           Cluster == "ESC3" ~ "Semi-persistent enrichment",
+                           Cluster == "ESC5" ~ "Persistent depletion")) %>% 
+  mutate(Cluster = fct_relevel(Cluster, "ESC3", "ESC5", "ESC1", "ESC2", "ESC4", "RSC2", "RSC1", "RSC4", "RSC3")) %>% 
   select(Compartment, Cluster, Trend, OTU_ID) %>% 
   inner_join(tax, by = "OTU_ID") %>% 
-  select(-PhyClass, -PhyClass2) 
+  select(-PhyClass, -PhyClass2) %>% 
+  arrange(Cluster, Phylum) %>% 
+  inner_join(silva.class, by = "OTU_ID")
 
-write.table(supp.clust.summary, "../Tables/dao_clstr.tsv", sep = "\t", quote = F, row.names = F)
+write.table(supp.clust.summary, "../Tables/dao_clstr_updated.tsv", sep = "\t", quote = F, row.names = F)
 ```
 
