@@ -78,7 +78,7 @@ trt.lines <- data.frame(Treatment = c("DS1", "DS2", "DS3"),
                         EndTreatment = c(5.5, 6.5, 7.5))
 ```
 
-
+Evaluate the distribution of significant OTUs across treatments and collection time points. 
 ```{r}
 all.sig <- rbind(mutate(rs.sig, Compartment = "RS"),
                  mutate(es.sig, Compartment = "ES"))
@@ -102,6 +102,8 @@ dao.p <- all.sig %>%
 
 dao.p
 ```
+
+Generate supplementary table with all differentially abundant OTUs. 
 ```{r}
 time.age <- map %>% 
   group_by(Time, Age) %>% 
@@ -129,7 +131,6 @@ names(m) <- c( "average", "single", "complete", "ward")
 
 
 RHIZOSPHERE
-
 z-transform relative abundances; calculate the mean z-score for each treatment, and time point combination; generate a matrix for hierarchical clustering
 ```{r}
 rs.zs.tidy <- rs.otu.tidy %>%
@@ -190,6 +191,8 @@ rs.ord <- rs.ord %>%
 
 Visualize as heatmap
 ```{r}
+### with relative abundances
+
 rs.hm.p <- rs.zs.tidy %>%
   inner_join(rs.ord, by = "OTU_ID") %>%
   mutate(Treatment = str_replace(Treatment, "D", "DS")) %>%
@@ -212,7 +215,8 @@ rs.hm.p <- rs.zs.tidy %>%
 
 rs.hm.p
 
-#################################
+#### with log fold changes. 
+
 rs.fc %>% 
   separate(Contrast, c("Treatment2", "Time"), sep = "\\.") %>% 
   mutate(Treatment = Treatment2) %>% 
@@ -275,19 +279,7 @@ rs.clstr.p <- rs.agg.ra %>%
 rs.clstr.p
 ```
 
-```{r}
-plot_grid(rs.hm.p, rs.clstr.p,
-          nrow = 1,
-          rel_widths = c(4,3),
-          align = "h",
-          axis = "b",
-          labels = c("A", "B"),
-          label_size = 20)
-```
-
-
 ENDOSPHERE
-
 z-transform relative abundances, calculate the mean z-score for each treatment, and time point combination, generate a matrix for hierarchical clustering
 ```{r}
 es.zs.tidy <- es.otu.tidy %>%
@@ -346,6 +338,8 @@ es.ord <- es.ord %>%
 
 Visualize as heatmap
 ```{r}
+### with relative abundances 
+
 es.hm.p <- es.zs.tidy %>% 
   inner_join(es.ord, by = "OTU_ID") %>% 
   mutate(Treatment = str_replace(Treatment, "D", "DS")) %>% 
@@ -369,7 +363,8 @@ es.hm.p <- es.zs.tidy %>%
 
 es.hm.p
 
-#################################
+### with log fold changes
+
 es.fc %>% 
   separate(Contrast, c("Treatment2", "Time"), sep = "\\.") %>% 
   mutate(Treatment = Treatment2) %>% 
@@ -432,25 +427,15 @@ es.clstr.p <- es.agg.ra %>%
 es.clstr.p
 ```
 
-```{r}
-plot_grid(es.hm.p, es.clstr.p,
-          nrow = 1,
-          rel_widths = c(3,2),
-          align = "h",
-          axis = "b",
-          labels = c("A", "B"),
-          label_size = 20)
-```
-
-
+Merge endosphere and rhizosphere results
 ```{r}
 all.ord <- rbind(mutate(rs.ord, Compartment = "RS"),
                  mutate(es.ord, Compartment = "ES"))
 ```
 
 
-Generate a data frame with all clustering results, and label the interesting clusters for downstreama analyses
-Genearte a data frame with all the mean z-scores for plotting
+Generate a data frame with all clustering results, and label the interesting clusters for downstream analyses
+Generate a data frame with all the mean z-scores for plotting
 ```{r}
 all.clust.summary <- rbind(mutate(rs.ord, Compartment = "RS"), 
                            mutate(es.ord, Compartment = "ES")) %>% 
@@ -479,6 +464,7 @@ all.agg.ra <- rbind(mutate(rs.agg.ra, Compartment = "RS"),
 saveRDS(all.clust.summary, "../Data/drought_clusters_updated.RDS")
 ```
 
+Get data frames with the aggregated abundances and taxonomies of each cluster
 ```{r}
 all.cluster.means <- all.agg.ra %>%
   mutate(Compartment = fct_recode(Compartment, 
@@ -514,6 +500,7 @@ all.cluster.tax <- all.clust.summary %>%
   mutate(Compartment = fct_relevel(Compartment, "Rhizosphere"))
 ```
 
+Plot the temporal trends displayed by each cluster (Figure 2)
 ```{r}
 all.ab <- all.cluster.ab %>% 
   ggplot(aes(Age, AggRelAb, color = Treatment2)) +
@@ -573,6 +560,7 @@ plot_grid(dao.p, all.ab, all.tax.p,
           label_size = 20) ###766:936
 ```
 
+Plot the taxonomies of all interesting clusters
 ```{r}
 all.cluster.tax %>% 
   group_by(Compartment, Trend, Phylum, PhyClass2, Class, Order) %>% 
@@ -595,7 +583,7 @@ all.cluster.tax %>%
         axis.ticks.y = element_blank())
 ```
 
-
+Generate a supplementary table with the taxonomies (Greengenes and the alternative SILVA annotation) of drought-responsive OTUs. 
 ```{r}
 silva.class <- read.table("../Data/gg.otu2silva.tax.txt", header = T, sep = "\t", quote = "", comment.char = "") %>% mutate(OTU_ID = as.character(OTU_ID))
 

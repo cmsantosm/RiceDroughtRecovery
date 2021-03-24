@@ -108,25 +108,6 @@ iso.pca.p
 ```
 #Stats
 ```{r}
-##block removed
-# mrl.model <- lm(mass_root_length ~ tray + isolate * trt, phenotypes)
-# anova(mrl.model)
-# CLD(emmeans(mrl.model,pairwise ~ paste(isolate,trt))$emmean)
-```
-
-```{r}
-# sl.model <- lm(shoot_len ~ tray + isolate * trt, phenotypes)
-# sw.model <- lm(shoot_wt ~ tray + isolate * trt, phenotypes)
-# rw.model <- lm(root_wt ~ tray + isolate * trt, phenotypes)
-# nr.model <- lm(n_roots ~ tray + isolate * trt, phenotypes)
-# anova.res <- rbind(anova(mrl.model) %>% as.data.frame() %>% add_rownames("term") %>% mutate(phenotype="Root Length"),
-#                    anova(sl.model) %>% as.data.frame() %>% add_rownames("term") %>% mutate(phenotype="Shoot Length"),
-#                    anova(rw.model) %>% as.data.frame() %>% add_rownames("term") %>% mutate(phenotype="Root Weight"), 
-#                    anova(sw.model) %>% as.data.frame() %>% add_rownames("term") %>% mutate(phenotype="Shoot Weight"),
-#                    anova(nr.model) %>% as.data.frame() %>% add_rownames("term") %>% mutate(phenotype="# Roots")) %>%
-#   select(phenotype,term:`Pr(>F)`)
-# anova.res
-
 mrl.model <- lmerTest::lmer(mass_root_length ~ (1|tray) + isolate * trt, phenotypes)
 sl.model <- lmerTest::lmer(shoot_len ~ (1|tray) + isolate * trt, phenotypes)
 sw.model <- lmerTest::lmer(shoot_wt ~ (1|tray) + isolate * trt, phenotypes)

@@ -1,7 +1,9 @@
+Load libraries
 ```{r}
 library(tidyverse)
 ```
 
+Load data and reformat
 ```{r}
 mbio.map <- readRDS("../Data/mbio_map.RDS") %>% 
   mutate(Compartment = fct_recode(Compartment,
@@ -28,15 +30,11 @@ organelle.id <- filter(tax, Assignment != "Microbial")$OTU_ID
 
 otu <- otu[!row.names(otu) %in% organelle.id,]
 
-```
-
-```{r}
 tidy.otu <- otu %>% 
   tidy_otu()
-
-tidy.otu
 ```
 
+Plot the drought response of OTU 1037355 in the data from Santos-Medellin, mBio 2017
 ```{r}
 drought.p <- tidy.otu %>% 
   inner_join(mbio.map, by = "SampleID") %>% 
@@ -61,6 +59,7 @@ drought.p <- tidy.otu %>%
 drought.p
 ```
 
+Plot the abundance-occupancy spectra across soils
 ```{r}
 n.samples <- meta.map %>% 
   group_by(Experiment, Compartment, Soil) %>% 
@@ -94,11 +93,12 @@ oc.ab.p <- oc.ab %>%
 
 oc.ab.p
 ```
-
+Check the stats on OTU 1037355    
 ```{r}
 oc.ab %>% filter(OTU_ID == "1037355")
 ```
 
+Put it all together
 ```{r}
 cowplot::plot_grid(oc.ab.p, drought.p, nrow = 2,
                    labels = c("A", "B"), label_size = 20)

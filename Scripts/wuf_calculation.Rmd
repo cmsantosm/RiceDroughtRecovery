@@ -3,12 +3,14 @@ title: "vsd_normalization"
 output: html_notebook
 ---
 
+Load libraries
 ```{r}
 library(DESeq2)
 library(phyloseq)
 library(tidyverse)
 ```
 
+Load data and format
 ```{r}
 otu <- readRDS("../Data/otu_pers.RDS")
 map <- readRDS("../Data/drought_map.RDS")
@@ -18,6 +20,7 @@ row.names(map) <- map$SampleID
 otu <- otu[,match(map$SampleID, colnames(otu))]
 ```
 
+Calculate variance stabilizing transformation
 ```{r}
 dds <- DESeqDataSetFromMatrix(countData = otu,
                               colData = map,
@@ -31,7 +34,7 @@ norm.blind <- assay(vsd.blind)
 
 saveRDS(norm.blind, "../Data/otu_vsd_blind.RDS")
 ```
-
+Calculate WUF
 ```{r}
 tree <- read_tree("../General/97_otus.tree")
 

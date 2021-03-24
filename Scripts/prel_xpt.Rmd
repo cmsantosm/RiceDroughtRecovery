@@ -1,3 +1,4 @@
+Load libraries
 ```{r}
 source("../General/rmb_functions.R")
 source("../General/parameters.R")
@@ -7,6 +8,7 @@ library(DESeq2)
 library(tidyverse)
 ```
 
+Load data and format
 ```{r}
 prel.map <- readRDS("../Data/drought_prel_map.RDS")
 prel.otu <- readRDS("../Data/otu_prel.RDS")
@@ -21,7 +23,7 @@ prel.otu.tidy <- prel.otu %>%
   tidy_otu()
 ```
 
- experimental timeline
+Plot experimental timeline
 ```{r}
 prel.xpt.ds <- tribble(
   ~Treatment, ~Age, ~PrevAge, ~WaterStatus,
@@ -55,6 +57,9 @@ prel.xpt.p <- prel.xpt.ds %>%
         legend.position = "none")
 prel.xpt.p
 ```
+
+Plot alluvial graph 
+IT WILL TAKE SOME TIME TO BE DONE
 ```{r}
 library(ggalluvial)
 
@@ -90,6 +95,7 @@ prel.ranked.p <- tmp %>%
 prel.ranked.p
 ```
 
+Merge plots
 ```{r}
 left <- plot_grid(prel.xpt.p, prel.ranked.p,
           ncol = 1,
@@ -100,6 +106,7 @@ left <- plot_grid(prel.xpt.p, prel.ranked.p,
 #left
 ```
 
+Cacluate WUF for preliminary experiment
 ```{r}
 prel.otu <- prel.otu[,match(prel.map$SampleID, colnames(prel.otu))]
 
@@ -114,10 +121,9 @@ otu[otu < 0.0] <- 0.0
 
 physeq <- phyloseq(otu_table(otu, taxa_are_rows = TRUE), tree)
 wuf <- as.matrix(phyloseq::distance(physeq, method = "wunifrac"))
-
-
 ```
 
+Separate by compartments
 ```{r}
 wuf <- as.matrix(wuf)
 
@@ -129,6 +135,7 @@ es.wuf <- wuf[match(es.map$SampleID, row.names(wuf)), match(es.map$SampleID, col
 
 ```
 
+Perform PCoAs
 ```{r}
 rs.pcoa.axes <- pcoa_axes(rs.wuf, rs.map)
 rs.pcoa.eig <- pcoa_eigval(rs.wuf, rs.map)
@@ -137,6 +144,7 @@ es.pcoa.axes <- pcoa_axes(es.wuf, es.map)
 es.pcoa.eig <- pcoa_eigval(es.wuf, es.map)
 ```
 
+Plot rhizosphere results
 ```{r}
 rs.means <- rs.pcoa.axes %>% 
   group_by(Treatment, Age) %>% 
@@ -159,7 +167,7 @@ rs.p <- rs.pcoa.axes %>%
 rs.p
 ```
 
-
+Plot endosphere results
 ```{r}
 es.means <- es.pcoa.axes %>% 
   group_by(Treatment, Age) %>% 
@@ -182,6 +190,7 @@ es.p <- es.pcoa.axes %>%
 es.p
 ```
 
+Merge plots
 ```{r}
 right <- plot_grid(rs.p, es.p,
                    ncol = 1,
@@ -191,6 +200,7 @@ right <- plot_grid(rs.p, es.p,
 right
 ```
 
+Put it all together. 
 ```{r}
 plot_grid(left, right, rel_widths = c(4,3))
 ```

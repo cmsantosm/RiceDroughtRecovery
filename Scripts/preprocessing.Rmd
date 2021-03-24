@@ -1,15 +1,15 @@
+Load libraries
 ```{r}
 library(tidyverse)
 source("../General/rmb_functions.R")
 ```
 
+Load data
 ```{r}
 map <- readRDS("../Data/drought_map.RDS")
 whole.otu <- readRDS("../Data/otu_unfiltered.RDS")
 tax <- readRDS("../Data/tax.RDS")
-```
 
-```{r}
 tax <- classify_organelle(tax)
 ```
 
@@ -27,80 +27,11 @@ org.tidy %>%
   inner_join(map, by = "SampleID") %>% 
   ggplot(aes(Tub, RelAb, fill = Assignment)) +
   geom_bar(stat = "identity") +
-  #scale_fill_manual(name = "Classification", values = org.pal) +
+  scale_fill_manual(name = "Classification", values = org.pal) +
   facet_grid(Compartment ~ Time, scales = "free") +
-  theme_light() +
-  theme(text = element_text(size = 20))
-
-org.tidy %>% 
-  filter(Assignment == "Microbial") %>% 
-  inner_join(map, by = "SampleID") %>% 
-  filter(Treatment2 != "WC_TRN") %>% 
-  ggplot(aes(paste(Treatment, Tub), RelAb, fill = Treatment)) +
-  geom_bar(stat = "identity") +
-  facet_grid(Compartment ~ Time)
-
-org.tidy %>% 
-  filter(Assignment == "Microbial") %>% 
-  inner_join(map, by = "SampleID") %>% 
-  filter(Treatment2 != "WC_TRN") %>% 
-  ggplot(aes(Treatment, RelAb, fill = Treatment)) +
-  geom_boxplot() +
-  facet_grid(Compartment ~ Time)
-```
-
-```{r}
-org.tidy2 <- whole.otu %>% 
-  tidy_otu() %>% 
-  inner_join(tax) %>% 
-  mutate(Assignment2 = case_when(Assignment != "Microbial" ~ "Organelle",
-                                 OTU_ID == "1037355" ~ "OTU 1037355",
-                                 TRUE ~ "Other OTU")) %>% 
-  group_by(SampleID, Assignment2) %>% 
-  summarise(Total = sum(Count)) %>% 
-  group_by(SampleID) %>% 
-  mutate(RelAb = Total/sum(Total))
-
-org.tidy2 %>% 
-  inner_join(map, by = "SampleID") %>% 
-  filter(Time > 4 & Time < 10) %>% 
-  ggplot(aes(Tub, RelAb, fill = Assignment2)) +
-  geom_bar(stat = "identity") +
-  #scale_fill_manual(name = "Classification", values = org.pal) +
-  facet_grid(Compartment ~ Time, scales = "free") +
-  theme_light() +
-  theme(text = element_text(size = 20))
-
-org.tidy2 %>% 
-  inner_join(map, by = "SampleID") %>% 
-  group_by(Compartment, Time, Treatment, Assignment2) %>% 
-  summarise(TotalRelAb = mean(RelAb)) %>% 
-  filter(Compartment == "ES") %>% 
-  #filter(Time > 4 & Time < 10) %>% 
-  #filter(Assignment2 != "Organelle") %>% 
-  ggplot(aes(Treatment, TotalRelAb, fill = Assignment2)) +
-  geom_bar(stat = "identity") +
-  #scale_fill_manual(name = "Classification", values = org.pal) +
-  facet_grid(Compartment ~ Time, scales = "free") +
-  scale_fill_manual(values = c("gray25", "gray75", "red")) +
-  theme_light() +
-  theme(text = element_text(size = 20))
-
-org.tidy2 %>% 
-  inner_join(map, by = "SampleID") %>% 
-  filter(Assignment2 != "Organelle") %>% 
-  filter(Compartment == "ES") %>% 
-  filter(Time > 3 & Time < 11) %>% 
-  ggplot(aes(as.factor(Tub), RelAb, fill = Assignment2)) +
-  geom_bar(stat = "identity") +
-  #scale_fill_manual(name = "Classification", values = org.pal) +
-  facet_grid(Compartment ~ Time + Treatment, scales = "free", space = "free") +
-  scale_fill_manual(values = c("gray25", "gray75", "red")) +
   theme_light() +
   theme(text = element_text(size = 20))
 ```
-
-
 Get the microbial OTUs
 ```{r}
 micro.id <- tax %>% 
@@ -151,6 +82,7 @@ pers.hist <- pers.stat %>%
 cowplot::plot_grid(pers.dot, pers.hist, nrow = 1)
 ```
 
+Explore how much data gets lost after filtering non-prevalent OTUs
 ```{r}
 pers.stat %>% 
   group_by(Persistence) %>% 
@@ -166,7 +98,6 @@ pers.stat %>%
   theme_bw() +
   theme(text = element_text(size = 15))
 ```
-
 
 Get the sequencing depth and richness for each of the otu tables
 ```{r}
@@ -189,7 +120,6 @@ seqstats.tidy <- seqstats %>%
 
 seqstats.tidy
 ```
-
 Get more sequencing stats
 ```{r}
 sets <- list(raw.data = whole.otu,
@@ -204,22 +134,6 @@ stats <- data.frame(nOTUs = sapply(sets, function(x) nrow(x)),
                     PercenMicrobial = sapply(sets, function(x) sum(x)/sum(otu.micro)))
 
 stats
-```
-
-```{r}
-org.tidy %>% 
-  mutate(Assignment2 = ifelse(Assignment == "Microbial", "Microbial", "Organelle")) %>% 
-  inner_join(map, by = "SampleID") %>% 
-  group_by(Compartment, Assignment2) %>% 
-  summarise(Sum = sum(Total),
-            median = median(RelAb))
-
-org.tidy %>% 
-  mutate(Assignment2 = ifelse(Assignment == "Microbial", "Microbial", "Organelle")) %>% 
-  inner_join(map, by = "SampleID") %>% 
-   group_by(Compartment, Assignment2) %>% 
-  summarise(Sum = sum(Total),
-            median = median(RelAb))
 ```
 
 ```{r}

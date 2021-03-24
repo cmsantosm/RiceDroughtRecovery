@@ -18,7 +18,7 @@ tax <- readRDS("../Data/tax.RDS") %>%
 tree <- ape::read.tree("../General/97_otus.tree")  
 ```
 
-
+Format
 ```{r}
 otu <- rel_ab(otu)
 otu.tidy <- tidy_otu(otu)
@@ -29,12 +29,14 @@ int.ids <- filter(clstr, Trend == "Semi-persistent enrichment") %>%
   .$OTU_ID
 ```
 
+Generate data frame for plotting the periods of drought stress
 ```{r}
 trt.lines <- data.frame(Treatment = c("DS1", "DS2", "DS3"),
                         IniTreatment = c(41, 41, 41),
                         EndTreatment = c(52, 62, 74))
 ```
 
+Calculate and plot abundance-occupancy curves
 ```{r}
 oc.ab <- otu.tidy %>% 
   mutate(Count = Count/100) %>% 
@@ -69,18 +71,16 @@ oc.ab.p <- oc.ab  %>%
 
 oc.ab.p
 ```
-
+Check the stats for OTU 1037355
 ```{r}
 oc.ab %>% 
   group_by(Compartment) %>% 
   mutate(PercMean = percent_rank(MeanRelAb)) %>% 
   filter(OTU_ID == "1037355")
-
-
-oc.ab %>% 
-  filter(OTU_ID == "1037355")
 ```
 
+Plot the alluvial graph 
+NOTE THAT THIS STEP WILL TAKE A LONG TIME TO COMPLETE
 ```{r}
 library(ggalluvial)
 
@@ -116,6 +116,8 @@ prel.ranked.p <- tmp %>%
 
 prel.ranked.p
 ```
+
+Put it all togehter (Figure 3)
 ```{r}
 plot_grid(oc.ab.p, prel.ranked.p, 
            align = "h",
@@ -125,7 +127,7 @@ plot_grid(oc.ab.p, prel.ranked.p,
            label_size = 20)
 ```
 
-
+Plot the alignments of the isolates mapping to OTU 1037355
 ```{r}
 iso.pal <- wesanderson::wes_palette(name = "Zissou1", n = 5, type = "discrete")[c(1,3,5)]
 
@@ -162,8 +164,10 @@ seq.p <- seqs %>%
         panel.grid.minor = element_blank(),
         legend.position="none")
 
-seq.p
+```
 
+Plot the abundance-occupancy info on the isolates used for the phenotyping experiment. 
+```{r}
 oc.ab <- otu.tidy %>% 
   #filter(Count > 0) %>% 
   mutate(Count = Count/100) %>% 
@@ -189,6 +193,8 @@ oc.ab.p <- oc.ab  %>%
   theme_classic() +
   theme(text = element_text(size = 15))
 ```
+
+Put it all together
 ```{r}
 plot_grid(seq.p, oc.ab.p,
           ncol = 1,

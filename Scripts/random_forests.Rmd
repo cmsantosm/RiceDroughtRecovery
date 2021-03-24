@@ -19,7 +19,7 @@ otu <- log_norm(otu)
 tax <- readRDS("../Data/tax.RDS")
 ```
 
-Randomly sample four out of eight water control replicates within each compartment and timepoint combination to use as a training set for the models.
+Subset the WC_TRN samples to use as a training set for the models.
 ```{r}
 train.id <- map %>% 
   filter(Treatment2 == "WC_TRN") %>% 
@@ -131,6 +131,7 @@ rf.ranks <- train.set %>%
   mutate(cmpOTU = paste(Compartment, OTU_ID),
          Rank = rank(PercIncMSE)) 
 
+##Plot the taxonomic information of the set of age-discriminant OTUs
 rf.ranks %>% 
   ggplot(aes(reorder(cmpOTU, Rank), PercIncMSE, fill = PhyClass2)) +
   geom_bar(stat = "identity") +
@@ -143,6 +144,8 @@ rf.ranks %>%
   theme(text = element_text(size = 20),
         axis.text.y = element_blank())
 ```
+
+Generate functions to cluster age-discriminant OTUs based on their changes in abundance across time.
 ```{r}
 otu.rf <- train.set %>% 
   unnest(imp.tax) %>% 
@@ -190,6 +193,7 @@ get_cluster <- function(df, var, nclust) {
 }
 ```
 
+Cluster endosphere OTUs
 ```{r}
 es.master.tidy <- otu.tidy %>% 
   inner_join(select(map, SampleID, Time, Compartment, Treatment), by = "SampleID") %>% 
@@ -223,6 +227,7 @@ es.plot.df <- es.master.tidy %>%
          ))
 ```
 
+Cluster rhizosphere OTUs
 ```{r}
 rs.master.tidy <- otu.tidy %>% 
   inner_join(select(map, SampleID, Time, Compartment, Treatment), by = "SampleID") %>% 
@@ -256,6 +261,7 @@ rs.plot.df <- rs.master.tidy %>%
          ))
 ```
 
+Plot heatmaps of age-discriminant OTUs
 ```{r}
 trt.lines <- data.frame(Treatment = c("DS1", "DS2", "DS3"),
                         Treatment2 = c("DS1", "DS2", "DS3"),
@@ -301,6 +307,7 @@ trend.p <- all.plot.df %>%
 trend.p
 ```
 
+Generate the supplementary table with the taxonomic info for the age-discriminant OTUs
 ```{r}
 rf.otus <- rbind(rs.plot.df, es.plot.df) %>% 
   group_by(Compartment, OTU_ID, Trend, Kingdom, Phylum, Class, Order, Family, Genus, Species) %>% 
@@ -311,6 +318,7 @@ rf.otus <- rbind(rs.plot.df, es.plot.df) %>%
 #write.table(rf.otus, "../Tables/rf_otus.tsv", sep = "\t", quote = F, row.names = F)
 ```
 
+Assess the overlap between age-discriminant OTUs and drought-responsive OTUs
 ```{r}
 all.clust.summary <- readRDS("../Data/drought_clusters_updated.RDS")
 
@@ -345,6 +353,7 @@ overlap.plot <- all.plot.df  %>%
 overlap.plot
 ```
 
+Plot the taxonomic info of early, late, and complex colonizers
 ```{r}
 rf.tax <- all.plot.df %>% 
   mutate(Compartment = fct_recode(Compartment, Rhizosphere = "RS", Endosphere = "ES")) %>% 
@@ -378,6 +387,7 @@ rf.tax <- all.plot.df %>%
 rf.tax
 ```
 
+Generate supplementary figure
 ```{r}
 supp.left <- plot_grid(cv.plot,
                        overlap.plot,
@@ -445,6 +455,7 @@ test.set %>%
   theme(text = element_text(size = 20)) 
 ```
 
+Get the loess curve of well-watered plants that will be used for plotting. 
 ```{r}
 predictions <- test.set %>% 
   unnest(prediction, age, data) %>% 
@@ -460,6 +471,7 @@ predictions.wc.plotting <- rbind(select(predictions.wc, -Treatment) %>% mutate(T
    mutate(Compartment = fct_recode(Compartment, Rhizosphere = "RS", Endosphere = "ES")) 
 ```
 
+Fit a loess curve between predicted ages of well-watered plants and chronological host age. This fit will be used as a baseline of normal microbiome development to calculate relative microbiome maturity of drought-stressed samples. 
 ```{r}
 
 loess.pred <- rbind(
@@ -477,6 +489,7 @@ predictions.wc %>% ggplot(aes(age, prediction, color = Compartment)) +
 
 ```
 
+Assess the effect of drought treatments on predicted microbiome age within each time point. 
 ```{r}
 library(broom)
 
@@ -505,9 +518,7 @@ get_contrasts <- function(fit) {
     rename("Time" = "TimeFctr") %>% 
     mutate(Time = as.integer(Time))
 }
-```
 
-```{r}
 predictions.nested <-predictions %>% 
   group_by(Compartment) %>% 
   nest() %>% 
@@ -524,6 +535,7 @@ rf.sig <- predictions.nested %>%
   ungroup()
 ```
 
+Plot predicted microbiome ages
 ```{r}
 a <- predictions %>% 
   filter(Treatment != "WC") %>% 
@@ -546,6 +558,7 @@ a <- predictions %>%
 a
 ```
 
+Plot relative microbiome maturity
 ```{r}
 b <- predictions %>%
   filter(Treatment != "WC") %>% 
@@ -580,6 +593,7 @@ b <- predictions %>%
 b
 ```
 
+Plot the temporal dynamics or early and late colonizers across treatments
 ```{r}
 c <- otu.tidy %>% 
   mutate(Count = Count/100) %>% 
@@ -615,6 +629,7 @@ c <- otu.tidy %>%
 c
 ```
 
+Put it all together (Fig 5)
 ```{r}
 left <- plot_grid(a,b + theme(legend.position = "none"), get_legend(b),
                   nrow = 3,
@@ -633,7 +648,8 @@ plot_grid(left, right,
           rel_widths = c(3,2))
 ```
 
-
+Supp Fig to show how relative microbiome maturity is calculated. 
+Step 1. Fit loess curve. 
 ```{r}
 sfig.a <- predictions %>% 
   filter(Treatment == "WC") %>% 
@@ -653,6 +669,8 @@ sfig.a <- predictions %>%
 sfig.a
 ```
 
+Supp Fig to show how relative microbiome maturity is calculated. 
+Step 2. Get the predicted age of a drought-stressed sample and compare it against the expected age of well-watered samples by interpolating the fitted loess curve. 
 ```{r}
 sfig.b <- predictions %>% 
   filter(Treatment == "D3") %>% 
@@ -675,7 +693,8 @@ sfig.b <- predictions %>%
 
 sfig.b
 ```
-
+Supp Fig to show how relative microbiome maturity is calculated. 
+Step 3. Apply this calculation to all samples. 
 ```{r}
 sfig.c <- predictions %>% 
   filter(Treatment == "D3") %>% 
@@ -699,10 +718,12 @@ sfig.c <- predictions %>%
 sfig.c
 ```
 
+Generate supplementary figure
 ```{r}
 cowplot::plot_grid(sfig.a, sfig.b, sfig.c, nrow = 1, align = "hv", axis = "tblr", labels = c("A", "B", "C"), label_size = 20)
 ```
 
+Get stats for all the contrasts performed. 
 ```{r}
 rs.anova <- predictions.nested %>% 
   unnest(anova) %>% 
@@ -734,6 +755,7 @@ es.contrasts <- rf.sig %>%
 # write.table(es.contrasts, "../Tables/es_rf_cntr.tsv", quote = F, row.names = F, sep = "\t")
 ```
 
+Plot the developmental stages of each plant collected and compare them agains their predicted microbiome age. 
 ```{r}
 stages <- read.table("../Data/growth_stages.txt", header = T, sep = "\t")
 

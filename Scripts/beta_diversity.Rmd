@@ -174,6 +174,7 @@ es.pc.trt <- es.pcoa.axes %>%
         legend.position = "right")
 ```
 
+Generate an expanded version of the PCoAs to show the effect of watering regime across individual collection time points. 
 ```{r}
 rs.expanded <- rs.pcoa.axes %>% 
   ggplot(aes(Axis.1, Axis.2, color = Treatment)) +
@@ -205,7 +206,7 @@ es.expanded <- es.pcoa.axes %>%
 
 ```
 
-
+Put it all together.
 ```{r}
 supp.legend <- plot_grid(get_legend(all.pcoa.p), get_legend(rs.pc.time))
 
@@ -270,13 +271,12 @@ es.pcoa.lmm <- es.pcoa.axes %>%
          anova = map(lmm, run_anova),
          contrasts = map(lmm, get_contrasts))
 ```
-
 Make a data frame to transform time points to ages
 ```{r}
 time.age <- map %>% group_by(Time, Age) %>% count() %>% select(-n)
 ```
 
-
+Plot rhizosphere PCoA results
 ```{r}
 rs.means <- rs.pcoa.axes %>% 
   group_by(Treatment, Age) %>% 
@@ -318,7 +318,7 @@ rs.plot <- plot_grid(rs.sig, rs.pc, ncol = 1, rel_heights = c(3,17), align = "v"
 
 rs.plot
 ```
-
+Plot endosphere PCoA results
 ```{r}
 es.means <- es.pcoa.axes %>% 
   group_by(Treatment, Age) %>% 
@@ -362,6 +362,7 @@ es.plot <- plot_grid(es.sig, es.pc, ncol = 1, rel_heights = c(3,17), align = "v"
 es.plot
 ```
 
+Format data frame to test effect of drought on soil moisture
 ```{r}
 soil <- map %>% 
   filter(Treatment2 != "WC_TRN") %>% 
@@ -369,7 +370,7 @@ soil <- map %>%
   mutate(TimeFctr = as.factor(Time))
 ```
 
-Run an anova to check for significant effects
+Run an anova and contrasts to test the effect of watering regime on soil moisture
 ```{r}
 soil.lmm <- lmerTest::lmer(PercentMoisture ~ Treatment * TimeFctr + (1|Row), data = soil)
 
@@ -384,7 +385,7 @@ soil.contrasts <- emmeans::emmeans(soil.lmm, specs = trt.vs.ctrl ~ Treatment|Tim
   mutate(Time = as.integer(Time))
 
 ```
-
+Plot soil moisture results
 ```{r}
 soil.means <- map %>% 
   group_by(Age, Treatment, WaterStatus) %>% 
@@ -428,7 +429,7 @@ sig.p
 soil.plot <- plot_grid(sig.p, soil.p, ncol = 1, rel_heights = c(3,17), align = "v")
 soil.plot
 ```
-
+Generate diagram depicting the timeline of watering regimes and collection scheme
 ```{r}
 xpt.ds <-  map %>% 
   mutate(Treatment = case_when(Treatment == "WC" ~ "WC",
@@ -460,7 +461,7 @@ xpt.p <- xpt.ds %>%
 
 xpt.p
 ```
-
+Put it all together. 
 ```{r}
 #386:1073
 
@@ -477,7 +478,7 @@ plot_grid(xpt.p,
           labels = c("A", "B", NA, "C", NA, "D", NA),
           label_size = 20)
 ```
-
+Generate a schematic showing the distribution of each plastic container in the greenhouse. 
 ```{r}
 whole.map <- readRDS("../Data/drought_map.RDS")
 
@@ -502,6 +503,7 @@ tubs.p <- whole.map %>%
 tubs.p
 ```
 
+Generate stats for all the contrasts performed. 
 ```{r}
 rs.anova <- rs.pcoa.lmm %>% 
   unnest(anova) %>% 
