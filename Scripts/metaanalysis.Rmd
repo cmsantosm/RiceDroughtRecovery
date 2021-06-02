@@ -1,5 +1,7 @@
 Load libraries
 ```{r}
+source("../General/rmb_functions.R")
+source("../General/parameters.R")
 library(tidyverse)
 ```
 
@@ -36,19 +38,35 @@ tidy.otu <- otu %>%
 
 Plot the drought response of OTU 1037355 in the data from Santos-Medellin, mBio 2017
 ```{r}
+wald <- read.table("../../RiceDroughtMB/Tables/16S_dab.tsv", header = T, sep = "\t")
+
+wald <- wald %>% filter(OTU_ID == "1037355") %>% 
+  select(Soil, Compartment, p.adjusted) %>% 
+  mutate(Soil = fct_recode(Soil, 
+                          "Arbuckle" = "A",
+                          "Biggs" = "B",
+                          "Davis" = "D"),
+         Compartment = fct_recode(Compartment,
+                                  "Rhizosphere" = "RS",
+                                  "Endosphere" = "ES") )
+
 drought.p <- tidy.otu %>% 
   inner_join(mbio.map, by = "SampleID") %>% 
   group_by(SampleID) %>% 
   mutate(RelAb = Count/sum(Count)) %>% 
+  ungroup() %>% 
   filter(OTU_ID == "1037355") %>% 
   filter(Compartment %in% c("Rhizosphere", "Endosphere")) %>% 
   mutate(Compartment = fct_relevel(Compartment, "Rhizosphere", "Endosphere")) %>% 
   filter(Compartment != "Bulk Soil") %>% 
-  ggplot(aes(Treatment, RelAb, color = Treatment)) +
-  geom_boxplot(outlier.shape = NA) +
-  geom_jitter() +
+  mutate(Treatment = fct_relevel(Treatment, "WC")) %>% 
+  ggplot() +
+  geom_boxplot(aes(Treatment, RelAb, color = Treatment), outlier.shape = NA) +
+  geom_jitter(aes(Treatment, RelAb, color = Treatment)) +
+  geom_segment(data = wald, aes(x = 1, xend = 2, y = 0.25, yend = 0.25)) +
+  geom_text(data = wald, aes(x = 1.5, y = 0.3, label = "***", hjust = 0.5)) +
   scale_y_log10(labels = scales::trans_format("log10", scales::math_format(10^.x))) +
-  scale_color_manual(values = trt.pal[c(3,1)]) +
+  scale_color_manual(values = trt.pal[c(1,3)]) +
   ylab("Relative abundance (log10)") +
   facet_grid(. ~ Compartment + Soil) +
   theme_classic() +

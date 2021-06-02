@@ -314,6 +314,31 @@ rs.sig <- rs.pcoa.lmm %>%
   theme_void() +
   theme(legend.position = "none")
 
+rs.sig <- rs.pcoa.lmm %>% 
+  unnest(contrasts) %>% 
+  filter(Axis == "Axis.1") %>% 
+  ungroup() %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  inner_join(time.age, by = "Time") %>% 
+  mutate(Treatment = fct_recode(Treatment,
+                                "WC vs DS1" = "D1",
+                                "WC vs DS2" = "D2",
+                                "WC vs DS3" = "D3")) %>% 
+  ggplot(aes(Age, Treatment)) +
+  geom_line(size = 0.1, color = "gray25") +
+  geom_point(aes(color = Treatment, alpha = p.adj < 0.05), shape = "*", size = 7) +
+  geom_point(aes(0,1), alpha = 0) +
+  scale_y_discrete(limits = c("WC vs DS3", "WC vs DS2", "WC vs DS1")) +
+  scale_x_continuous(breaks = seq(0,140,20)) +
+  scale_color_manual(values = trt.pal[-1]) +
+  scale_alpha_manual(values = c(0,1)) +
+  theme(text = element_text(size = 13),
+        axis.title = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_blank(),
+        legend.position = "none") 
+
 rs.plot <- plot_grid(rs.sig, rs.pc, ncol = 1, rel_heights = c(3,17), align = "v")
 
 rs.plot
@@ -356,6 +381,31 @@ es.sig <- es.pcoa.lmm %>%
   scale_alpha_manual(values = c(0,1)) +
   theme_void() +
   theme(legend.position = "none")
+
+es.sig <- es.pcoa.lmm %>% 
+  unnest(contrasts) %>% 
+  filter(Axis == "Axis.1") %>% 
+  ungroup() %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  inner_join(time.age, by = "Time") %>% 
+  mutate(Treatment = fct_recode(Treatment,
+                                "WC vs DS1" = "D1",
+                                "WC vs DS2" = "D2",
+                                "WC vs DS3" = "D3")) %>% 
+  ggplot(aes(Age, Treatment)) +
+  geom_line(size = 0.1, color = "gray25") +
+  geom_point(aes(color = Treatment, alpha = p.adj < 0.05), shape = "*", size = 7) +
+  geom_point(aes(0,1), alpha = 0) +
+  scale_y_discrete(limits = c("WC vs DS3", "WC vs DS2", "WC vs DS1")) +
+  scale_x_continuous(breaks = seq(0,140,20)) +
+  scale_color_manual(values = trt.pal[-1]) +
+  scale_alpha_manual(values = c(0,1)) +
+  theme(text = element_text(size = 13),
+        axis.title = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_blank(),
+        legend.position = "none") 
 
 es.plot <- plot_grid(es.sig, es.pc, ncol = 1, rel_heights = c(3,17), align = "v")
 
@@ -424,6 +474,29 @@ sig.p <- soil.contrasts %>%
   theme_void() +
   theme(legend.position = "none") 
 
+sig.p <- soil.contrasts %>% 
+  ungroup() %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  inner_join(time.age, by = "Time") %>% 
+  mutate(Treatment = fct_recode(Treatment,
+                                "WC vs DS1" = "D1",
+                                "WC vs DS2" = "D2",
+                                "WC vs DS3" = "D3")) %>% 
+  ggplot(aes(Age, Treatment)) +
+  geom_line(size = 0.1, color = "gray25") +
+  geom_point(aes(color = Treatment, alpha = p.adj < 0.05), shape = "*", size = 7) +
+  geom_point(aes(0,1), alpha = 0) +
+  scale_y_discrete(limits = c("WC vs DS3", "WC vs DS2", "WC vs DS1")) +
+  scale_x_continuous(breaks = seq(0,140,20)) +
+  scale_color_manual(values = trt.pal[-1]) +
+  scale_alpha_manual(values = c(0,1)) +
+  theme(text = element_text(size = 13),
+        axis.title = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_blank(),
+        legend.position = "none") 
+
 sig.p
 
 soil.plot <- plot_grid(sig.p, soil.p, ncol = 1, rel_heights = c(3,17), align = "v")
@@ -472,9 +545,9 @@ plot_grid(xpt.p,
           ncol = 1,
           align = "v",
           rel_heights = c(10,
-                          3,17,
-                          3,17,
-                          3,17),
+                          4,17,
+                          4,17,
+                          4,17),
           labels = c("A", "B", NA, "C", NA, "D", NA),
           label_size = 20)
 ```

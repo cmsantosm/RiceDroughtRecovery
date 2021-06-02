@@ -1,0 +1,227 @@
+Load libraries
+```{r}
+source("../General/rmb_functions.R")
+source("../General/parameters.R")
+library(vegan)
+library(broom)
+library(tidyverse)
+```
+
+Load and reformat data
+```{r}
+otu <- readRDS("../Data/otu_vsd_blind.RDS")
+otu[otu < 0.0] <- 0.0
+
+tax <- readRDS("../Data/tax.RDS") %>% 
+  classify_organelle()
+map <- readRDS("../Data/drought_map.RDS") %>% 
+  mutate(TimeFctr = as.factor(Time)) %>% 
+  mutate(Treatment = fct_recode(Treatment,
+                                "DS1" = "D1",
+                                "DS2" = "D2",
+                                "DS3" = "D3",
+                                "WC" = "WC"))
+
+micro.id <- filter(tax, Assignment == "Microbial")$OTU_ID
+
+time.age <- map %>% group_by(Time, Age) %>% count() %>% select(-n)
+
+table(rownames(otu) %in% micro.id)
+```
+
+Calculate alpha diversity
+```{r}
+alpha <- data.frame(SampleID = colnames(otu),
+                    Shannon = diversity(t(otu))) %>% 
+  inner_join(map, by = "SampleID") %>% 
+  filter(Treatment2 != "WC_TRN")
+
+alpha.rs <- filter(alpha, Compartment == "RS")
+alpha.es <- filter(alpha, Compartment == "ES")
+```
+
+
+Perform rhizopshere analysis
+```{r}
+alpha.rs.means <- alpha.rs %>% 
+  group_by(Compartment, Treatment, Age) %>% 
+  mutate(Mean = mean(Shannon)) %>% 
+  ungroup()
+
+rs.plot <- alpha.rs %>% 
+  ggplot(aes(Age, Shannon)) +
+  geom_vline(xintercept = ws.line, linetype = 3, color = "gray20", size = 0.5) +
+  geom_point(aes(color = Treatment), alpha = 1, shape = 1, size = 2) +
+  geom_line(data = alpha.rs.means, aes(y = Mean, color = Treatment), size = 1) +
+  xlab("Plant age (days)") +
+   ylab("Rhizosphere\nShannon index") +
+  scale_fill_manual(values = trt.pal) +
+  scale_color_manual(values = trt.pal) +
+  scale_x_continuous(breaks = seq(0,140,20)) +
+  theme_classic() +
+  theme(legend.position = "none",
+        text = element_text(size = 15))
+
+alpha.rs.lmm <- lmerTest::lmer(Shannon ~ Treatment * TimeFctr + (1|Row), data = alpha.rs)
+
+alpha.rs.aov <- anova(alpha.rs.lmm) %>% 
+  tidy()
+
+alpha.rs.contrasts <- emmeans::emmeans(alpha.rs.lmm, specs = trt.vs.ctrl ~ Treatment|TimeFctr, adjust = "none") %>% 
+  .$contrasts %>% 
+  as.data.frame() %>% 
+  separate(contrast, c("Treatment", "Control")) %>% 
+  rename("Time" = "TimeFctr") %>% 
+  mutate(Time = as.integer(Time))
+
+alpha.rs.contrasts
+
+rs.sig <- alpha.rs.contrasts %>% 
+  ungroup() %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  inner_join(time.age, by = "Time") %>% 
+  ggplot(aes(Age, Treatment)) +
+  geom_point(aes(color = Treatment, alpha = p.adj < 0.05), shape = "*", size = 7) +
+  scale_y_discrete(limits = c("D3", "D2", "D1")) +
+  scale_x_continuous(breaks = seq(0,140,20)) +
+  scale_color_manual(values = trt.pal[-1]) +
+  scale_alpha_manual(values = c(0,1)) +
+  xlab("Plant age (days)") +
+  #xlim(0,NA) +
+  theme_void() +
+  theme(legend.position = "none") 
+
+rs.sig <- alpha.rs.contrasts %>% 
+  ungroup() %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  inner_join(time.age, by = "Time") %>% 
+  mutate(Treatment = fct_recode(Treatment,
+                                "WC vs DS1" = "DS1",
+                                "WC vs DS2" = "DS2",
+                                "WC vs DS3" = "DS3")) %>% 
+  ggplot(aes(Age, Treatment)) +
+  geom_line(size = 0.1, color = "gray25") +
+  geom_point(aes(color = Treatment, alpha = p.adj < 0.05), shape = "*", size = 7) +
+  scale_y_discrete(limits = c("WC vs DS3", "WC vs DS2", "WC vs DS1")) +
+  scale_x_continuous(breaks = seq(0,140,20)) +
+  scale_color_manual(values = trt.pal[-1]) +
+  scale_alpha_manual(values = c(0,1)) +
+  xlab("Plant age (days)") +
+  #theme_void() +
+  theme(text = element_text(size = 13),
+        axis.title = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_blank(),
+        legend.position = "none") 
+
+rs.final <- cowplot::plot_grid(rs.sig, rs.plot, ncol = 1, rel_heights = c(4,17), align = "v")
+
+rs.final
+```
+Perform endosphere analysis
+```{r}
+alpha.es.means <- alpha.es %>% 
+  group_by(Compartment, Treatment, Age) %>% 
+  mutate(Mean = mean(Shannon)) %>% 
+  ungroup()
+
+es.plot <- alpha.es %>% 
+  ggplot(aes(Age, Shannon)) +
+  geom_vline(xintercept = ws.line, linetype = 3, color = "gray20", size = 0.5) +
+  geom_point(aes(color = Treatment), alpha = 1, shape = 1, size = 2) +
+  geom_line(data = alpha.es.means, aes(y = Mean, color = Treatment), size = 1) +
+  xlab("Plant age (days)") +
+   ylab("Endosphere\nShannon index") +
+  scale_fill_manual(values = trt.pal) +
+  scale_color_manual(values = trt.pal) +
+  scale_x_continuous(breaks = seq(0,140,20)) +
+  theme_classic() +
+  theme(legend.position = "none",
+        text = element_text(size = 15))
+
+alpha.es.lmm <- lmerTest::lmer(Shannon ~ Treatment * TimeFctr + (1|Row), data = alpha.es)
+
+alpha.es.aov <- anova(alpha.es.lmm) %>% 
+  tidy()
+
+alpha.es.contrasts <- emmeans::emmeans(alpha.es.lmm, specs = trt.vs.ctrl ~ Treatment|TimeFctr, adjust = "none") %>% 
+  .$contrasts %>% 
+  as.data.frame() %>% 
+  separate(contrast, c("Treatment", "Control")) %>% 
+  rename("Time" = "TimeFctr") %>% 
+  mutate(Time = as.integer(Time))
+
+alpha.es.contrasts
+
+es.sig <- alpha.es.contrasts %>% 
+  ungroup() %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  inner_join(time.age, by = "Time") %>% 
+  ggplot(aes(Age, Treatment)) +
+  geom_point(aes(color = Treatment, alpha = p.adj < 0.05), shape = "*", size = 7) +
+  scale_y_discrete(limits = c("D3", "D2", "D1")) +
+  scale_x_continuous(breaks = seq(0,140,20)) +
+  scale_color_manual(values = trt.pal[-1]) +
+  scale_alpha_manual(values = c(0,1)) +
+  xlab("Plant age (days)") +
+  theme_void() +
+  theme(legend.position = "none") 
+
+cowplot::plot_grid(es.sig, es.plot, ncol = 1, rel_heights = c(3,17), align = "v")
+
+es.sig <- alpha.es.contrasts %>% 
+  ungroup() %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  inner_join(time.age, by = "Time") %>% 
+  mutate(Treatment = fct_recode(Treatment,
+                                "WC vs DS1" = "DS1",
+                                "WC vs DS2" = "DS2",
+                                "WC vs DS3" = "DS3")) %>% 
+  ggplot(aes(Age, Treatment)) +
+  geom_line(size = 0.1, color = "gray25") +
+  geom_point(aes(color = Treatment, alpha = p.adj < 0.05), shape = "*", size = 7) +
+  scale_y_discrete(limits = c("WC vs DS3", "WC vs DS2", "WC vs DS1")) +
+  scale_x_continuous(breaks = seq(0,140,20)) +
+  scale_color_manual(values = trt.pal[-1]) +
+  scale_alpha_manual(values = c(0,1)) +
+  xlab("Plant age (days)") +
+  #theme_void() +
+  theme(text = element_text(size = 13),
+        axis.title = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_blank(),
+        legend.position = "none") 
+
+es.final <- cowplot::plot_grid(es.sig, es.plot, ncol = 1, rel_heights = c(4,17), align = "v")
+es.final
+```
+
+```{r}
+cowplot::plot_grid(rs.final, es.final, cowplot::get_legend(es.plot + theme(legend.position = "right")), labels = c("A", "B", NA), nrow = 1, label_size = 20, rel_widths = c(3,3,1))
+```
+
+Generate supplementary tables with contrasts
+```{r}
+alpha.rs.contrasts <- alpha.rs.contrasts %>% 
+  ungroup() %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  mutate(Contrast = paste(Treatment, Control, sep = "-")) %>% 
+  select(Contrast, Time:p.adj)
+
+alpha.es.contrasts <- alpha.es.contrasts %>% 
+  ungroup() %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  mutate(Contrast = paste(Treatment, Control, sep = "-")) %>% 
+  select(Contrast, Time:p.adj)
+```
+
+Save tables
+```{r}
+write.table(alpha.rs.aov, "../Tables/rs_alpha_anova.tsv", quote = F, row.names = F, sep = "\t")
+write.table(alpha.es.aov, "../Tables/es_alpha_anova.tsv", quote = F, row.names = F, sep = "\t")
+write.table(alpha.rs.contrasts, "../Tables/rs_alpha_contrasts.tsv", quote = F, row.names = F, sep = "\t")
+write.table(alpha.es.contrasts, "../Tables/es_alpha_contrasts.tsv", quote = F, row.names = F, sep = "\t")
+```
+
